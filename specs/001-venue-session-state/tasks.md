@@ -88,9 +88,9 @@ Cargo workspace per plan.md Structure Decision:
 *code* work, so they run alongside Phase 2 — but no venue dataset may be built before its own
 blocker clears.
 
-- [ ] T021 [P] Verify SSE 09:25–09:30 and 15:00–15:05 against the SSE Trading Rules (2026 Revision) and record the finding in `specs/001-venue-session-state/research.md` under D4a. **MUST NOT be filled by inference** — the obvious guesses are unsourced and Principle I forbids presenting derived as observed. Blocker #1; gates T040
-- [ ] T022 [P] Fetch `ice.com/terms-of-use` and record verbatim in `specs/001-venue-session-state/research.md` under D6, then classify NYSE data into a `DATA-LICENSING.md` tier. Blocker #2; gates T041
-- [ ] T023 [P] Re-fetch Binance terms with a JS-capable browser (the SPA defeated plain fetch), record verbatim under D6, classify into a tier. Blocker #3; gates T042
+- [x] T021 [P] Verify SSE 09:25–09:30 and 15:00–15:05 against the SSE Trading Rules (2026 Revision) and record the finding in `specs/001-venue-session-state/research.md` under D4a. **MUST NOT be filled by inference** — the obvious guesses are unsourced and Principle I forbids presenting derived as observed. Blocker #1; gates T040
+- [x] T022 [P] Fetch `ice.com/terms-of-use` and record verbatim in `specs/001-venue-session-state/research.md` under D6, then classify NYSE data into a `DATA-LICENSING.md` tier. Blocker #2; gates T041
+- [x] T023 [P] Re-fetch Binance terms with a JS-capable browser (the SPA defeated plain fetch), record verbatim under D6, classify into a tier. Blocker #3; gates T042
 - [ ] T024 [P] Source NYSE's full published session boundary table first-party (pre-market start, core open/close, after-hours end) and record under D3. Blocker #4; gates T033
 - [ ] T025 [P] Capture the NYSE early-close footnote byte-exact; substance is established (13:00 close, day after Thanksgiving and Christmas Eve), wording is not. Blocker #5; gates T034
 

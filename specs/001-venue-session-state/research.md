@@ -162,6 +162,87 @@ SSE Trading Rules (2026 Revision) before any SSE dataset revision is built.
 Worth recording plainly: the tiling invariant found a hole in our own captured evidence before
 a line of code existed. That is the invariant working, not a setback.
 
+### D4b — Both intervals resolved from source (T021, 2026-07-30)
+
+Verified against the Trading Rules PDF, full 61-page read. **Neither interval was filled by
+inference.**
+
+**15:00 – 15:05 — addressed by the Rules.** Three articles construct it affirmatively:
+
+> Art. 3.7.9: "Closing price orders submitted between 9:30 to 15:05 shall not be included into
+> real time quotations; those submitted and executed during the after-hours fixed-price trading
+> session, which is between 15:05 to 15:30, shall be included into the real time quotations."
+
+> Art. 3.7.3: "The Exchange will accept the closing price orders from trading participants from
+> 9:30 to 11:30 and from 13:00 to 15:30 on each trading day. … During the sessions for accepting
+> members' order routing, any unexecuted orders may be canceled."
+
+> Art. 3.7.2: "The after-hours fixed-price trading session is 15:05-15:30 on each trading day."
+
+Read together: during 15:00–15:05 after-hours orders **are accepted and cancellable, are not
+matched, and are not in real-time quotations**. Order acceptance without matching, ahead of a
+session that starts at 15:05. That is the definition of `pre_open` in our vocabulary.
+
+**Mapping: `pre_open`.** Sourced, not guessed.
+
+**09:25 – 09:30 — defined by exclusion, not by assertion.** The Rules never say "no orders are
+accepted between 9:25 and 9:30". What they do is draw the boundary at 9:25/9:30 in three
+independent provisions, none of which includes the interval:
+
+> Art. 2.4.2: opening call auction 9:15–9:25; continuous auction 9:30–11:30 and 13:00–14:57.
+
+> Art. 3.3.1: "The Exchange accepts auction trading orders from trading participants during the
+> following periods on each trading day: 9:15 to 9:25, 9:30 to 11:30, and 13:00 to 15:00."
+
+> Art. 5.2.1: real-time quotations cover 9:15–9:25 and 14:57–15:00.
+
+So: **no order acceptance, no matching, no quotations.** Three separate provisions agreeing is
+stronger than silence, but it is still exclusion rather than assertion, and the distinction is
+recorded rather than smoothed over.
+
+Corroborating that the drafters name sub-states when they mean to — Art. 3.3.1 also carves out
+a no-cancellation sub-window *inside* the opening auction ("will not accept any order
+cancellation requests during the opening auction between 9:20-9:25"). They had the vocabulary
+and did not use it for 9:25–9:30.
+
+**Mapping: `closed`** — see D4c for the reasoning, which is a modelling decision rather than a
+source fact and is marked as ours.
+
+### D4c — Modelling decision: 09:25–09:30 maps to `closed`
+
+Ours to decide, so recorded as ours. During the interval the venue accepts nothing, matches
+nothing, and publishes nothing. Three candidate mappings:
+
+| Option | Verdict |
+|---|---|
+| `closed` | **Chosen.** "Closed" means the venue is neither accepting nor matching. It need not mean "outside the trading day" |
+| `non_trading_interruption` | Rejected — that kind is for halts and maintenance, i.e. exceptions. This is a scheduled, recurring, daily interval |
+| a ninth phase kind | Rejected — it would exist to serve one venue's five minutes, which is the venue-specific-vocabulary failure FR-005 forbids |
+
+Marked `is_derived` per FR-010: the interval's *content* is sourced by exclusion, its *phase
+name* is our mapping.
+
+### D4d — The captured SSE day was also too short. Block trading runs to 17:00.
+
+**Found during T021, not previously in scope.** Art. 3.6.3:
+
+> "The Exchange accepts block trade orders during the following periods on each trading day:
+> (1) Intent orders: 9:30-11:30 and 13:00-15:30; (2) Execution orders: 9:30-11:30, 13:00-15:30,
+> and 16:00-17:00; and (3) Fixed-price orders: 15:00-15:30."
+
+Art. 3.6.4: "Trades confirmed during the period from 16:00 to 17:00 on each trading day shall be
+cleared and settled on the next trading day."
+
+So after the after-hours session closes at 15:30 there is a gap to 16:00, then a further hour
+where block-trade **execution orders only** are accepted and confirmed, settling next day.
+
+**This is a scope question, not a mapping question, and it is open.** It is the same shape as
+Binance spot versus perpetuals: one venue, several mechanisms, different schedules. Either
+"SSE" means the auction market and block trading is a separate venue entity, or one venue must
+carry several concurrent mechanism timelines — which breaks the single-timeline tiling
+assumption in `PhaseTimeline`. **Carried forward as a blocking decision; it changes the data
+model, not just the data.**
+
 ---
 
 ## D5 — Binance's funding interval is itself versioned rule data
@@ -217,16 +298,89 @@ redistribution. Per `DATA-LICENSING.md`, SSE data therefore falls in the
 **non-redistributable** tier: the source is registered with its evidence record and its
 schedule is referenced, but **the dataset is not vendored into this repository**.
 
-**NYSE — unresolved.** The Terms of Use document found (`TOP_Terms_of_Use.pdf`) is scoped to
-NYSE's Trade Ops Portal, not obviously to the public hours-and-calendars page. NYSE pages
-footer to `ice.com/terms-of-use`, which was not fetched. **Action before ingestion**: fetch and
-record `ice.com/terms-of-use`.
+**NYSE — resolved (T022, 2026-07-30). Also non-redistributable.**
 
-**Binance — unresolved.** `binance.com/en/terms` is a client-rendered single-page app; neither
-plain fetch nor the browser-rendering tool returned the legal body text across several
-attempts. A quote attributed to that URL exists but is **unverified by direct rendering** and
-MUST NOT be relied on for a licensing decision. **Action before ingestion**: re-fetch with a
-JS-capable browser and record verbatim.
+The governing document is ICE's Terms of Use (`ice.com/terms-of-use`), not the previously found
+`TOP_Terms_of_Use.pdf`, which is scoped to NYSE's ops portals. Confidence is high on three
+independent signals: the ICE document's own scope clause names `www.nyse.com` explicitly; the
+footer of `nyse.com/trade/hours-calendars` links "Terms of Use" straight to ICE; and
+`nyse.com/terms`, `/legal`, and `/privacy` all return 404 — NYSE carries no site-level terms of
+its own.
+
+> "You acknowledge and agree that, unless ICE … give you prior written permission, you will not
+> … sell, license, rent, modify, print, collect, copy, reproduce, download, upload, transmit,
+> disclose, distribute, disseminate, publicly display, publicly perform, publish, edit, adapt,
+> electronically extract or scrub, compile or create derivative works from any content or
+> materials (including, without limitation, through framing or **systematic retrieval to create
+> collections, compilations, databases or directories**)"
+
+> "…a limited license to access and use this Website and to download and print copies of any
+> content … but only for your own **personal, non-commercial use** … The foregoing license does
+> not include use of any **data mining, robots or similar data gathering or extraction
+> methods**."
+
+Those emphasised phrases describe building a calendar dataset almost exactly. **No carve-out for
+factual or schedule data was found**, and the Proprietary Rights clause bundles "all compilations
+of real time or other information" without distinguishing a holiday calendar from a price feed.
+`Trading_Days.pdf` carries no document-level notice of its own, so it inherits the hosting page's
+terms.
+
+**Binance — resolved (T023, 2026-07-30). Also restricted, and the retrieval is worth recording.**
+
+The earlier failure had the right conclusion and the wrong reason. `binance.com/en/terms` is not
+a slow SPA — **the legal text is not in the DOM at all.** It is a 73-page PDF fetched by
+background XHR into a pdf.js viewer after an AWS WAF challenge completes. No plain fetch can ever
+see it. It was obtained by reading the browser's own network log to find the PDF URL, then
+extracting text through pdf.js's `getTextContent()` API.
+
+**A trap worth naming**: `curl` against that same PDF URL returns HTTP 200 and an **8-page**
+document; the browser's pdf.js reports **73 pages** for the identical URL. The resource silently
+serves truncated content without the WAF session token. The curl copy was discarded rather than
+quoted.
+
+The document is an ADGM financial-services account agreement, not a website terms-of-use. A
+full-text search of the 208,000 extracted characters for the usual boilerplate — scrape, copy,
+reproduce, redistribute, resell, aggregate, frame — returned **zero matches**. The only clause
+governing reuse is the IP licence:
+
+> Clause 27: "We grant to you a non-exclusive licence for the duration of the Agreement … to use
+> the Binance IP, excluding the Trade Marks, solely as necessary to allow you to receive the
+> Binance Services for **non-commercial personal or internal business use**, in accordance with
+> the Agreement."
+
+Also confirmed: `developers.binance.com/.../PROD-TERMS-OF-USE` is a one-paragraph stub pointing
+back to the same document, and the USD-M futures docs carry no separate terms. All three entry
+points funnel to one legal document.
+
+**Two caveats recorded rather than smoothed**: the served variant is entity- and
+geography-dependent (ADGM entities, selected by egress IP), so other jurisdictions may see
+different clauses; and "Funding Fee" is defined by reference to separate Clearing Rules that were
+not reachable from these URLs and remain unfetched.
+
+### D6a — All three launch venues are non-redistributable. This is a product constraint.
+
+| Venue | Governing text | Position |
+|---|---|---|
+| SSE | Trading Rules Art. 5.1.3 + legal statement | Use or publication requires Exchange permission |
+| NYSE | ICE Terms of Use | Personal, non-commercial only; systematic retrieval into a database explicitly named |
+| Binance | ADGM Terms cl. 27 | Non-commercial personal or internal business use only |
+
+Not one of the three permits commercial redistribution of its published schedule, and not one
+carves out factual or calendar data.
+
+**Consequences, stated plainly:**
+
+1. **No venue dataset may be vendored into this repository.** All three fall in the
+   non-redistributable tier of `DATA-LICENSING.md`. Fetch-at-run-time is the only compliant
+   shape, which makes `market-time-data` the entire ingestion architecture rather than a
+   convenience.
+2. **What Mark Time can distribute is its own work**: the phase model, the venue-to-vocabulary
+   mappings, the schema, the evidence structure, the code. Rule data is referenced and fetched,
+   never shipped.
+3. **There is a product question above the engineering one.** "Internal business use" covers a
+   team running this for itself. Distributing Mark Time as a product that fetches these venues'
+   data on a user's behalf is a materially different question. It belongs to the project owner,
+   not to a spec. **Escalated, not assumed.**
 
 **Separately confirmed**: a well-known Chinese financial aggregator's published terms forbid
 reuse of its data for AI training or commercial purposes. Aggregators are design references
