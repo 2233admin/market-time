@@ -16,6 +16,14 @@ Auditable time infrastructure for global financial markets. Two layers, in order
 
 Layer 1 is table stakes. Layer 2 is why this exists.
 
+**Primary consumer is an autonomous agent that trades**, not a person. A human sees that a
+rendered number looks approximate; an agent does not. So uncertainty and unknown live in the
+returned value and in the type system, never only in the rendering. If a fact would only reach a
+human through visual nuance, it is not yet modelled.
+
+Open source, public repository — but **no venue data ever ships from here**. See AGENTS.md
+"No venue data ships from this repository."
+
 ## Standalone
 
 Mark Time is an independent product. It is **not** a subsystem of `k-atana` or any other
@@ -52,7 +60,8 @@ are not precedent here.
 
 - Licensing: code is `MIT OR Apache-2.0`. Copyright holder is `The Mark Time Authors`.
 - `Cargo.lock` is deliberately committed. Do not add it to `.gitignore`.
-- Repository is private. Remote is `github.com/2233admin/market-time`, default branch `main`.
+- Repository is **public**. Remote is `github.com/2233admin/market-time`, default branch `main`.
+  Assume anything committed here is world-readable the moment it is pushed.
 
 ## Host quirks (this machine)
 

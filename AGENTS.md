@@ -17,6 +17,18 @@ Two layers, in this order:
 
 Plenty of products do layer 1. Layer 2 is the product.
 
+**Primary consumer: autonomous agents that trade**, and other systems. Humans reading a board
+are a real but secondary audience.
+
+That is a design constraint, not positioning. A human sees that a rendered number looks
+approximate; an agent does not. So uncertainty and unknown live in the returned value and in the
+type system, never only in the rendering. An unknown and a closed market are different values,
+not one value shown two ways. If a fact would only reach a human through visual nuance, it is not
+yet modelled.
+
+Open source, public repository. The code, the phase model, the mappings, and the schema are the
+open part. **Venue data is never shipped here** — see "Data sourcing rules".
+
 ## Standalone. Not a subsystem of anything.
 
 Mark Time is an independent product with its own repository, its own release cycle, and its
@@ -80,6 +92,31 @@ Tracking table with the rejected simpler alternative — never left silent.
   well-known Chinese financial aggregator's terms explicitly forbid reuse of its data for AI
   training or commercial purposes. Aggregators are useful as design references for what to
   display, never as data sources.)
+
+### No venue data ships from this repository. Ever.
+
+All three launch venues were checked in full and none permits commercial redistribution of its
+published schedule; none carves out factual or calendar data.
+
+| Venue | Governing text | Position |
+|---|---|---|
+| SSE | Trading Rules Art. 5.1.3 | use or publication requires Exchange permission |
+| NYSE | ICE Terms of Use | personal, non-commercial only; "systematic retrieval to create collections, compilations, databases" named explicitly |
+| Binance | ADGM Terms cl. 27 | non-commercial personal or internal business use only |
+
+Consequences that bind implementation:
+
+- `market-time-data` is the **entire ingestion architecture**, not a convenience layer.
+  Fetch-at-run-time is the only compliant shape.
+- A pull request that vendors a venue calendar into this repository is rejected on sight,
+  regardless of how small or how obviously factual the data looks.
+- Mark Time is a **client, not a redistributor**. The operator fetches under their own
+  relationship with each venue and is responsible for their own compliance.
+- Where a venue offers a permission path, taking it is the intended route. SSE states one
+  explicitly.
+- A source's terms are recorded at registration alongside its evidence, so "under what terms
+  did we obtain this" is answerable per record — same discipline as `source_url` and
+  `fetched_at`, and for the same reason.
 
 ## Time correctness rules
 

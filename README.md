@@ -20,6 +20,20 @@ What sets it apart from an ordinary time/calendar library:
   provisional answer, Mark Time says so. Outside its verified coverage, it returns an
   explicit unknown rather than extrapolating a schedule.
 
+## Who it is for
+
+Machines first. Mark Time is infrastructure for **autonomous agents that trade**, and for other
+systems that need to know what is open, where, and how far that answer can be trusted. People
+reading the board are a legitimate second audience, not the design centre.
+
+That ordering has a concrete consequence rather than being a slogan. A person looking at a board
+can see that a number is fuzzy. **An agent cannot.** So uncertainty and unknown are not
+presentation concerns here — they are part of the returned value, and the type system makes them
+impossible to skip past. An agent that never inspects an answer's uncertainty still cannot
+mistake an unknown for a closed market, because the two are different values rather than the same
+value rendered differently. Anything a human would infer from how a screen looks has to survive
+as data.
+
 ## Status
 
 Pre-alpha. No code has been released yet. This repository currently contains only
@@ -70,7 +84,24 @@ licensed as above, without any additional terms or conditions.
 
 ### Data licensing
 
-The dual license above covers **code only**. Rule data — exchange calendars, holiday
-tables, session definitions — is sourced from upstream publishers and is not relicensed
-by this project. Each record carries its own source and terms. See
-[DATA-LICENSING.md](DATA-LICENSING.md) for details.
+The dual license above covers **code only**. Rule data — exchange calendars, holiday tables,
+session definitions — is sourced from upstream publishers and is not relicensed by this project.
+Each record carries its own source and terms. See [DATA-LICENSING.md](DATA-LICENSING.md).
+
+**This is not a formality.** All three launch venues were checked, and none of them permits
+commercial redistribution of its published schedule, nor carves out factual or calendar data:
+
+| Venue | Governing text | Position |
+|---|---|---|
+| SSE | Trading Rules Art. 5.1.3 | use or publication requires Exchange permission |
+| NYSE | ICE Terms of Use | personal, non-commercial only; "systematic retrieval to create collections, compilations, databases" is named explicitly |
+| Binance | ADGM Terms cl. 27 | non-commercial personal or internal business use only |
+
+So **this repository ships no venue data, and never will.** What is open source here is the
+model, the venue-to-vocabulary mappings, the schema, the evidence structure, and the code.
+Schedules are fetched at run time by the operator, under the operator's own relationship with
+each venue — Mark Time is a client, not a redistributor.
+
+Operators are responsible for their own compliance with each venue's terms. Where a venue offers
+a permission path, taking it is the intended route rather than a nicety; SSE states one
+explicitly.
