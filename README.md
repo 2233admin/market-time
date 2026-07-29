@@ -37,9 +37,13 @@ constrain how consumers may trust its output:
   boundary, a DST transition, a funding interval — is stored with the evidence that
   justifies it (source, fetch time, effective date). Nothing derived is presented as
   observed.
-- **Explicit Instants, Explicit Uncertainty.** Instants are nanosecond-precision and
-  never ambiguous about their frame. Every answer can carry uncertainty, and queries
-  outside known coverage return an explicit unknown rather than a guess.
+- **Explicit Instants, Explicit Uncertainty.** Instants are nanosecond-precision and never
+  ambiguous about their frame or their time scale — UTC is the published scale, and input
+  on another scale (TAI, GNSS system time) is tagged and converted leap-second-aware, never
+  by a hardcoded offset. Nanosecond representation is an arithmetic guarantee, not an
+  accuracy claim: where a venue publishes a boundary to the second or deliberately
+  randomises it, the answer's uncertainty says so. Queries outside known coverage return an
+  explicit unknown rather than a guess.
 - **Versioned Rule Data, Never Hardcoded.** Time-zone data, exchange calendars, and venue
   schedules are versioned data artifacts with pinned identifiers, never literals embedded
   in source code. Every build reports the data versions it was loaded against.
