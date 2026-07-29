@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  no-vendored-venue-data:
+    name: no venue data vendored
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every launch venue forbids commercial redistribution of its published schedule
+      # (research D6a). No venue dataset may ever be committed here. This gate exists so
+      # that rule is enforced by CI rather than by remembering it during review.
+      - name: Reject vendored venue datasets
+        run: |
+          if [ -d data ]; then
+            echo "::error::A 'data/' directory is present. Venue schedules must be fetched at"
+            echo "::error::run time, never vendored -- see DATA-LICENSING.md and research D6a."
+            exit 1
+          fi

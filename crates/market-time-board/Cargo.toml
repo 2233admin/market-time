@@ -1,0 +1,13 @@
+[package]
+name = "market-time-board"
+description = "Global trading-hours board for Mark Time. A thin shell; holds no domain logic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+market-time-core = { path = "../market-time-core" }
+market-time-data = { path = "../market-time-data" }

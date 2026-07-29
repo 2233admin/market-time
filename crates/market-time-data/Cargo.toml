@@ -1,0 +1,12 @@
+[package]
+name = "market-time-data"
+description = "Dataset revisions and loaders for Mark Time. All I/O lives here."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+market-time-core = { path = "../market-time-core" }

@@ -1,0 +1,15 @@
+[package]
+name = "market-time-scales"
+description = "Ingest boundary for Mark Time: leap-second-aware conversion from TAI/GNSS/monotonic scales into UTC."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# This crate exists to give the leap-second seam exactly one location in the tree
+# (research D1a). hifitime models time scales and carries the IERS leap-second table;
+# jiff, downstream of here, does not model leap seconds at all.
+[dependencies]
+hifitime.workspace = true

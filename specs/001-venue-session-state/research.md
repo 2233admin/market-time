@@ -85,6 +85,39 @@ identifier in our own dataset-revision metadata.
 cross-check for `VERSION_HASH`. Deferred — it adds a dependency for an assurance we can get
 more cheaply by pinning. Revisit if reproducibility ever needs proving to a third party.
 
+### D2a — Correction: `jiff-tzdb` does export a public version constant (T003, 2026-07-30)
+
+**D2 above is wrong on its central claim** and the correction is recorded rather than the
+original quietly edited, because the wrong version shaped a task.
+
+The Phase 0 survey concluded that `jiff-tzdb` "only exposes `available()`/`get()` functions — no
+public VERSION constant", and T003 was written to hand-maintain the release identifier against
+jiff's changelog. Reading the vendored source during implementation showed otherwise:
+
+```rust
+// jiff-tzdb-0.1.8/lib.rs
+pub static VERSION: Option<&str> = tzname::VERSION;
+// jiff-tzdb-0.1.8/tzname.rs
+pub(super) static VERSION: Option<&str> = Some(r"2026c");
+```
+
+`tzname::VERSION` is `pub(super)`, which is presumably what the survey saw; `lib.rs` re-exports
+it publicly.
+
+**Consequence — a strictly better implementation.** `market-time-core` takes `jiff-tzdb` as a
+direct dependency and reads the release at runtime instead of carrying a transcribed constant. A
+hand-copied provenance claim that drifts out of step with its dependency is worse than no claim,
+because it is wrong with confidence.
+
+**Verified at runtime, not inferred**: the pin test prints `IANA tzdb release in this build:
+2026c`, and asserts both that the bundled database is populated (catching the case where
+`tzdb-bundle-always` is not actually active and the host's unpinned zoneinfo is answering) and
+that the release identifier is reportable.
+
+The general lesson, worth keeping: a documentation survey establishes what is *documented*.
+Reading the source establishes what is *there*. For a load-bearing claim, the second is what
+counts.
+
 ---
 
 ## D3 — NYSE does not randomise its open. It has no single open instant at all.
@@ -236,12 +269,41 @@ cleared and settled on the next trading day."
 So after the after-hours session closes at 15:30 there is a gap to 16:00, then a further hour
 where block-trade **execution orders only** are accepted and confirmed, settling next day.
 
-**This is a scope question, not a mapping question, and it is open.** It is the same shape as
-Binance spot versus perpetuals: one venue, several mechanisms, different schedules. Either
-"SSE" means the auction market and block trading is a separate venue entity, or one venue must
-carry several concurrent mechanism timelines — which breaks the single-timeline tiling
-assumption in `PhaseTimeline`. **Carried forward as a blocking decision; it changes the data
-model, not just the data.**
+**This was a scope question, not a mapping question. Resolved 2026-07-30 — see D4e.**
+
+### D4e — A venue entity is one matching mechanism, not one legal exchange
+
+**Decision**: SSE block trading is a **separate venue entity** from the SSE auction market.
+Generalised into a rule, because this class of question will recur on every venue onboarded:
+
+> **One venue entity per matching mechanism, not per legal exchange.**
+> If two order flows at the same exchange have different schedules, different order-acceptance
+> windows, or different matching rules, they are two venue entities.
+
+**Rationale**: the alternative — one entity carrying several concurrent mechanism timelines —
+breaks the single-timeline assumption that makes `PhaseTimeline`'s tiling invariant enforceable.
+Once a venue may hold N overlapping timelines, "phases tile all covered time with no gaps or
+overlaps" (FR-008) stops being checkable by a constructor and degrades into a convention. The
+invariant is load-bearing, so the model bends first.
+
+**What it resolves beyond SSE:**
+
+- Binance spot and USD-M perpetual futures are two venue entities, not one venue with a flag.
+  The slice-1 decision to cover perpetuals only is therefore a *scope* choice, not a modelling
+  compromise.
+- NYSE and NYSE Arca are separate entities, which matters for the Arca overnight session
+  (9:00 PM–4:00 AM, pending SEC approval, targeted 2026-12-06) that would otherwise appear to
+  contradict NYSE's published hours.
+
+**Cost, stated honestly**: venue identity gets more granular, so a consumer asking "is Shanghai
+open" must name which mechanism. That is a genuine ergonomic cost. It is accepted because the
+alternative hides a real distinction behind a friendly-looking answer, which is exactly what this
+product exists not to do. A convenience grouping over related entities can be added later at the
+shell layer, where it belongs — and where it cannot corrupt the invariant.
+
+**Slice-1 scope impact: none.** Block trading is not in the launch set. The model must merely not
+preclude it, and this decision ensures it does not. `SSE` in slice 1 means the auction market
+only, and the coverage declaration says so.
 
 ---
 

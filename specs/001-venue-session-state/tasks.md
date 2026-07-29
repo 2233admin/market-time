@@ -37,12 +37,12 @@ Cargo workspace per plan.md Structure Decision:
 
 **Purpose**: workspace initialization and the build configuration that reproducibility depends on.
 
-- [ ] T001 Create Cargo workspace at `Cargo.toml` with members `crates/market-time-core`, `crates/market-time-scales`, `crates/market-time-data`, `crates/market-time-cli`, `crates/market-time-board`; set `[workspace.package]` with `license = "MIT OR Apache-2.0"`, `repository`, `edition = "2024"`, and a pinned `rust-version`
-- [ ] T002 Add `jiff` to `crates/market-time-core/Cargo.toml` with `default-features = false` and feature `tzdb-bundle-always` enabled. **This is the G4 mitigation and is not optional**: jiff's default Unix behaviour reads the unpinned OS zoneinfo, which silently breaks reproducibility (research D2)
-- [ ] T003 Record the pinned IANA tzdata release identifier in `crates/market-time-core/src/tzdata.rs` as a build-time constant, derived from the pinned `jiff-tzdb` version via jiff's changelog. jiff exposes no runtime version string, so this fact is ours to carry (research D2)
-- [ ] T004 [P] Add `hifitime` to `crates/market-time-scales/Cargo.toml`
-- [ ] T005 [P] Configure `rustfmt.toml` and `clippy.toml` at repository root
-- [ ] T006 [P] Add `.github/workflows/ci.yml` running `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test --workspace`
+- [x] T001 Create Cargo workspace at `Cargo.toml` with members `crates/market-time-core`, `crates/market-time-scales`, `crates/market-time-data`, `crates/market-time-cli`, `crates/market-time-board`; set `[workspace.package]` with `license = "MIT OR Apache-2.0"`, `repository`, `edition = "2024"`, and a pinned `rust-version`
+- [x] T002 Add `jiff` to `crates/market-time-core/Cargo.toml` with `default-features = false` and feature `tzdb-bundle-always` enabled. **This is the G4 mitigation and is not optional**: jiff's default Unix behaviour reads the unpinned OS zoneinfo, which silently breaks reproducibility (research D2)
+- [x] T003 Record the pinned IANA tzdata release identifier in `crates/market-time-core/src/tzdata.rs` as a build-time constant, derived from the pinned `jiff-tzdb` version via jiff's changelog. jiff exposes no runtime version string, so this fact is ours to carry (research D2)
+- [x] T004 [P] Add `hifitime` to `crates/market-time-scales/Cargo.toml`
+- [x] T005 [P] Configure `rustfmt.toml` and `clippy.toml` at repository root
+- [x] T006 [P] Add `.github/workflows/ci.yml` running `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test --workspace`
 
 ---
 

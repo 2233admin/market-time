@@ -1,0 +1,17 @@
+[package]
+name = "market-time-cli"
+description = "Thin CLI shell over the Mark Time core."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "market-time"
+path = "src/main.rs"
+
+[dependencies]
+market-time-core = { path = "../market-time-core" }
+market-time-data = { path = "../market-time-data" }

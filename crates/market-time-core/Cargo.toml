@@ -1,0 +1,17 @@
+[package]
+name = "market-time-core"
+description = "Pure phase-resolution core for Mark Time. No I/O, no network, no clock reads."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# Constitution Principle IV: this crate's decision path performs no I/O, opens no
+# sockets, and reads no clock. Dependencies here are load-bearing on that promise --
+# adding one that can do any of those things breaks the guarantee structurally, not
+# just by convention. See tests/contract/no_io_no_clock.rs.
+[dependencies]
+jiff.workspace = true
+jiff-tzdb.workspace = true

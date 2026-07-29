@@ -1,0 +1,2 @@
+# Keep the bar high in a correctness-critical codebase.
+avoid-breaking-exported-api = false

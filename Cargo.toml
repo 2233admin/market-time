@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/market-time-core",
+    "crates/market-time-scales",
+    "crates/market-time-data",
+    "crates/market-time-cli",
+    "crates/market-time-board",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/2233admin/market-time"
+authors = ["The Mark Time Authors"]
+
+[workspace.dependencies]
+# Civil time, IANA zones, DST ambiguity.
+#
+# `tzdb-bundle-always` is NOT a preference. jiff's default behaviour on Unix reads
+# the host's /usr/share/zoneinfo, which is unpinned and would silently break
+# reproducibility (constitution Principle III; research D2, plan.md gate G4).
+# The bundled database is compiled in so a given build always answers from a known
+# IANA release.
+jiff = { version = "0.2", default-features = false, features = [
+    "std",
+    "tzdb-bundle-always",
+] }
+
+# Time scales (TAI / UTC / GNSS) and the IERS leap-second table.
+# Used only by market-time-scales, at the ingest boundary. See research D1a.
+hifitime = "4.3"
+
+# The bundled IANA database, taken as a direct dependency so its exported
+# `VERSION` can be read at runtime. jiff pulls this in transitively via
+# `tzdb-bundle-always`; naming it here is what makes the release identifier
+# reportable rather than hand-transcribed (Principle III).
+jiff-tzdb = "0.1"
