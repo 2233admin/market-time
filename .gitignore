@@ -1,0 +1,41 @@
+# =============================================================================
+# Rust build output
+# =============================================================================
+/target
+**/*.rs.bk
+
+# Cargo.lock is intentionally NOT ignored: Mark Time ships binaries, and
+# current Rust guidance is to commit the lockfile for binary crates so builds
+# are reproducible. Do not add Cargo.lock to this file.
+
+# =============================================================================
+# OS noise
+# =============================================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =============================================================================
+# Editor / IDE noise
+# =============================================================================
+.idea/
+.vscode/*
+# Keep shared editor settings (recommended extensions, formatter/task config)
+# if the project ever adds them deliberately; unignore explicitly here.
+!.vscode/settings.json
+*.swp
+
+# =============================================================================
+# Local environment / secrets
+# =============================================================================
+.env
+.env.local
+
+# =============================================================================
+# Upstream data cache (see DATA-LICENSING.md)
+# =============================================================================
+# Some upstream-sourced datasets (exchange calendars, holiday tables, venue
+# notices) may not be redistributed, per the data-licensing policy. Those are
+# fetched at build or run time rather than vendored, and any local cache of
+# that fetched data must stay untracked.
+/data/cache/
