@@ -1,42 +1,54 @@
 <!--
 SYNC IMPACT REPORT
-Version change: 1.0.0 → 1.1.0
-Bump rationale: MINOR. Principle II is materially expanded — time scale, leap seconds and
-  smearing, and the precision-versus-accuracy rule are now explicit. Nothing is removed and
-  no existing rule is redefined in a backward-incompatible way: every 1.0.0 requirement
-  still holds verbatim, so work already conforming to 1.0.0 stays conforming.
+Version change: 1.1.0 → 1.2.0
+Bump rationale: MINOR. Principle III is narrowed and retitled. Its hygiene clause ("never
+  literals embedded in source code") is dropped as ordinary engineering practice that does
+  not need constitutional standing; its reproducibility guarantee is retained and
+  strengthened by making revision immutability explicit.
+
+  Bump-type reasoning, recorded because this case is arguable: a MAJOR bump is reserved for
+  backward-incompatible removals or redefinitions. Relaxing a constraint cannot make
+  already-conforming work non-conforming, the principle itself is not removed, and the
+  load-bearing guarantee is stronger than before — so MINOR. The one genuinely
+  backward-incompatible effect is cosmetic: anything citing Principle III by its old title
+  now cites a title that no longer exists. No such citation exists outside this repository.
 
 Modified principles:
-  II. Explicit Instants, Explicit Uncertainty (title unchanged, body expanded)
-      + Time scale MUST be declared on absolute instants; UTC is the published scale.
-        Conversion from TAI/GNSS/monotonic scales MUST be leap-second-aware, never a
-        hardcoded constant.
-      + Leap-second table is versioned rule data under Principle III; leap smearing MUST be
-        recorded against the source, not silently accepted as UTC.
-      + Precision is not accuracy: nanosecond representation is an arithmetic guarantee, not
-        an accuracy claim. Published boundary and observed boundary are distinct claims.
-      = Existing frame, uncertainty, and explicit-unknown rules retained unchanged.
+  III. "Versioned Rule Data, Never Hardcoded" → "Reproducible Rule Data"
+      - Dropped: the "never literals embedded in source code" requirement.
+      + Added: dataset revisions are IMMUTABLE — a correction produces a new revision,
+        never an edit in place. This was implied before and is now stated.
+      + Added: every answer MUST be attributable to the revisions that produced it.
+      = Retained: builds report the revisions they run against; same revision set plus same
+        query returns the same answer.
+      Rationale rewritten to state the division of labour against Principle I explicitly:
+      I says where a rule came from, III says which rule set was in force.
 
-Unmodified principles: I, III, IV, V
+Unmodified principles: I, II, IV, V
 
-Sections modified:
-  - Domain and Data Constraints — added "Clock discipline is out of scope; its quality is
-    not", making host clock sync a shell-level uncertainty source rather than a core concern.
+Sections modified: none in this revision.
 
 Added sections: none
 Removed sections: none
 
-Baseline (1.0.0, ratified 2026-07-29): initial ratification of Principles I–V, Domain and
-  Data Constraints, Development Workflow and Quality Gates, and Governance.
+Prior revisions:
+  1.1.0 (2026-07-29) — Principle II materially expanded: time scale MUST be declared on
+    absolute instants (UTC published, TAI/GNSS/monotonic input tagged and converted
+    leap-second-aware, never by a hardcoded constant); leap-second table governed as rule
+    data and leap smearing recorded against the source; precision is not accuracy, so
+    published and observed boundaries are distinct claims. Domain and Data Constraints
+    gained "Clock discipline is out of scope; its quality is not".
+  1.0.0 (2026-07-29) — initial ratification of Principles I–V, Domain and Data Constraints,
+    Development Workflow and Quality Gates, and Governance.
 
 Template consistency:
   ✅ .specify/templates/plan-template.md — "Constitution Check" is a derive-at-plan-time
      placeholder with no hardcoded principle names; no edit required.
   ✅ .specify/templates/spec-template.md — stock scope/requirements structure, compatible
      with Principles I–V; no edit required.
-  ✅ README.md — Principle II summary updated in the same change to state the time-scale
-     and precision-versus-accuracy rules, so the public summary does not understate the
-     principle it points at.
+  ✅ README.md — Principle III summary retitled and rewritten in the same change, so the
+     public summary does not cite a principle title that no longer exists. (Principle II's
+     summary was brought in line at 1.1.0.)
 
 Deferred TODOs: none
 -->
@@ -107,20 +119,22 @@ at nanosecond resolution a mislabelled time scale is not a rounding error — it
 whole-second-class defect wearing a precise-looking number, and it will not announce
 itself.
 
-### III. Versioned Rule Data, Never Hardcoded
+### III. Reproducible Rule Data
 
-Time-zone data, exchange calendars, session and phase definitions, and crypto venue
-schedules are versioned data artifacts with pinned identifiers — never literals embedded
-in source code.
+Rule data — time-zone data, exchange calendars, session and phase definitions, crypto venue
+schedules — ships as versioned dataset revisions with stable identifiers. **A revision is
+immutable**: correcting a rule produces a new revision, never an edit in place.
 
-Every build MUST pin and report the versions it was compiled or loaded against (at
-minimum the IANA tzdata release and each calendar dataset revision). Rule updates ship as
-data revisions with their own evidence per Principle I, and MUST be reproducible: given a
-dataset revision, the same query returns the same answer.
+Every build MUST report the revisions it is running against, at minimum the IANA tzdata
+release and each calendar dataset revision. Every answer MUST be attributable to the
+revisions that produced it. Given the same revision set and the same query, the system MUST
+return the same answer it returned before.
 
-**Rationale**: Zone rules and exchange calendars change on political and administrative
-timelines, not release timelines. Data that can be re-pinned and replayed is auditable;
-recompiled constants are not.
+**Rationale**: Principle I says where a rule came from. This principle says which rule set
+was in force. An audit needs both — reconstructing why an answer was given last quarter is
+impossible if the dataset that produced it was overwritten since. Zone rules and exchange
+calendars change on political and administrative timelines, so overwrite-in-place is the
+default failure mode here, not an edge case.
 
 ### IV. Library-First Core, Thin Shells
 
@@ -208,4 +222,4 @@ that new rules carry evidence (I), that new answers can express uncertainty and 
 (II), that no rule was hardcoded (III), that domain logic did not leak into a shell (IV),
 and that boundary behaviour gained a golden vector (V).
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-29 | **Last Amended**: 2026-07-29
+**Version**: 1.2.0 | **Ratified**: 2026-07-29 | **Last Amended**: 2026-07-29

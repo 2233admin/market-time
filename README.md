@@ -44,9 +44,10 @@ constrain how consumers may trust its output:
   accuracy claim: where a venue publishes a boundary to the second or deliberately
   randomises it, the answer's uncertainty says so. Queries outside known coverage return an
   explicit unknown rather than a guess.
-- **Versioned Rule Data, Never Hardcoded.** Time-zone data, exchange calendars, and venue
-  schedules are versioned data artifacts with pinned identifiers, never literals embedded
-  in source code. Every build reports the data versions it was loaded against.
+- **Reproducible Rule Data.** Time-zone data, exchange calendars, and venue schedules ship
+  as immutable, versioned dataset revisions — a correction produces a new revision, never
+  an edit in place. Every build reports the revisions it runs against, so a past answer can
+  be replayed against the rule set that was actually in force when it was given.
 
 See [`.specify/memory/constitution.md`](.specify/memory/constitution.md) for the full
 text, including Principles IV and V and the governance rules.
