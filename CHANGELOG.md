@@ -99,7 +99,7 @@ ships here, now or ever.
 
 ### Verification
 
-143 tests, including 24 golden vectors and two mechanical Principle IV guards. `cargo fmt`,
+145 tests, including 24 golden vectors and two mechanical Principle IV guards. `cargo fmt`,
 `clippy -D warnings`, and `cargo test --workspace` all clean. Quickstart validation recorded
 in `docs/venue-session-state/quickstart-results.md`.
 

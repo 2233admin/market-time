@@ -453,8 +453,10 @@ fn render_band_section(
                 BandState::NotTrading => palette::BAND_NOT_TRADING.to_owned(),
                 _ => palette::UNHANDLED.to_owned(),
             };
-            let hover =
-                band_hover_text(band_state_word(segment.state), segment.uncertainty.as_ref());
+            let hover = band_hover_text(
+                &band_state_word(segment.state),
+                segment.uncertainty.as_ref(),
+            );
             (segment.interval, fill, hover)
         });
         render_derived_row(svg, &band_label(band), segments, view.interval, &geometry);
@@ -486,7 +488,7 @@ fn render_band_section(
                     _ => palette::UNHANDLED.to_owned(),
                 };
                 let hover = band_hover_text(
-                    overlap_state_word(segment.state),
+                    &overlap_state_word(segment.state),
                     segment.uncertainty.as_ref(),
                 );
                 (segment.interval, fill, hover)

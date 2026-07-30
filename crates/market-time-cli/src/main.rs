@@ -14,8 +14,8 @@ use market_time_board::{
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
 use market_time_core::{
-    BandDefinition, BandId, BandOverlap, BandSegment, BandState, OverlapSegment, OverlapState,
-    SessionBand, derive_band, derive_overlap,
+    BandDefinition, BandId, BandOverlap, BandSegment, OverlapSegment, SessionBand, derive_band,
+    derive_overlap,
 };
 use market_time_core::{
     CivilInstant, CivilResolution, IanaZoneId, Phase, PhaseOutcome, Ruleset, resolve_phase,
@@ -511,20 +511,55 @@ fn bands_command(
     let interval = options.window(now.instant)?;
     let (bands, overlaps) = derive_all(&selected, ruleset, interval)?;
 
+    // `select_bands` fails loudly when `--band` names an id this dataset does not declare
+    // (its own doc comment) rather than silently dropping it, so an empty selection is not a
+    // state this command can reach: the only way `bands` ends up empty is a dataset that
+    // declares none. A second variant covering the unreachable case would be scaffolding
+    // claiming to be a distinction.
+    let empty_reason = bands
+        .is_empty()
+        .then_some(BandsEmptyReason::DatasetDeclaresNone);
+
     if options.format == Format::Json {
-        return Ok(pretty(&bands_json(&bands, &overlaps)));
+        return Ok(pretty(&bands_json(&bands, &overlaps, empty_reason)));
     }
 
-    Ok(bands_text(&bands, &overlaps))
+    Ok(bands_text(&bands, &overlaps, empty_reason))
+}
+
+/// Why `bands_command` has nothing to report: the `bands` command exists to talk about
+/// bands, so an empty result must say why in both `text` and `json` output rather than
+/// rendering as silence (a bare `"\n"`) or an empty shape with no explanation.
+#[derive(Clone, Copy)]
+enum BandsEmptyReason {
+    /// The dataset itself declares no session bands.
+    DatasetDeclaresNone,
+}
+
+impl BandsEmptyReason {
+    fn message(self) -> &'static str {
+        match self {
+            Self::DatasetDeclaresNone => "this dataset declares no session bands",
+        }
+    }
 }
 
 /// The machine shape of the `bands` command: every selected band, then every pairwise
 /// overlap, each carrying `"derived": true` and its reasoning so a consumer can never
 /// mistake either for a venue-published fact.
-fn bands_json(bands: &[SessionBand], overlaps: &[BandOverlap]) -> Value {
+///
+/// `no_bands_reason` is always present as a key, `null` when `bands` is non-empty, a message
+/// when it is not — so an empty-bands consumer sees why in the shape itself, rather than
+/// having to infer it from an absent key.
+fn bands_json(
+    bands: &[SessionBand],
+    overlaps: &[BandOverlap],
+    empty_reason: Option<BandsEmptyReason>,
+) -> Value {
     json!({
         "bands": bands.iter().map(band_json).collect::<Vec<Value>>(),
         "overlaps": overlaps.iter().map(overlap_json).collect::<Vec<Value>>(),
+        "no_bands_reason": empty_reason.map(BandsEmptyReason::message),
     })
 }
 
@@ -549,7 +584,7 @@ fn band_segment_json(segment: &BandSegment) -> Value {
     json!({
         "start": show(segment.interval.start),
         "end": show(segment.interval.end),
-        "state": band_state_str(segment.state),
+        "state": segment.state.as_str(),
         "uncertainty": segment.uncertainty.as_ref().map(ToString::to_string),
         "venues_trading": segment.venues_trading.iter().map(ToString::to_string).collect::<Vec<String>>(),
         "venues_unknown": segment.venues_unknown.iter().map(ToString::to_string).collect::<Vec<String>>(),
@@ -570,30 +605,18 @@ fn overlap_segment_json(segment: &OverlapSegment) -> Value {
     json!({
         "start": show(segment.interval.start),
         "end": show(segment.interval.end),
-        "state": overlap_state_str(segment.state),
+        "state": segment.state.as_str(),
         "uncertainty": segment.uncertainty.as_ref().map(ToString::to_string),
     })
 }
 
-fn band_state_str(state: BandState) -> &'static str {
-    match state {
-        BandState::Trading => "trading",
-        BandState::NotTrading => "not_trading",
-        BandState::Unknown => "unknown",
-        // The vocabulary is closed and owned by the core; this shell cannot extend it. A
-        // state added to the core after this build renders as "unrecognized" rather than
-        // silently as one of the known three.
-        _ => "unrecognized",
-    }
-}
-
-fn overlap_state_str(state: OverlapState) -> &'static str {
-    match state {
-        OverlapState::Overlapping => "overlapping",
-        OverlapState::NotOverlapping => "not_overlapping",
-        OverlapState::Unknown => "unknown",
-        _ => "unrecognized",
-    }
+/// Turns a stable identifier — `BandState::as_str`, `OverlapState::as_str`, or
+/// [`Phase::as_str`]'s convention — into words for a person to read: `"not_trading"`
+/// becomes `"not trading"`. The one place in this shell that does that transform, so text
+/// rendering reads the vocabulary from the core (`state.as_str()`) rather than re-matching
+/// the enum itself to spell out its own copy of the same three words.
+fn prose(identifier: &str) -> String {
+    identifier.replace('_', " ")
 }
 
 /// The phrase for a slice with no uncertainty to report at all — every contributing
@@ -621,7 +644,15 @@ fn venue_list(venues: &[VenueId]) -> String {
     }
 }
 
-fn bands_text(bands: &[SessionBand], overlaps: &[BandOverlap]) -> String {
+fn bands_text(
+    bands: &[SessionBand],
+    overlaps: &[BandOverlap],
+    empty_reason: Option<BandsEmptyReason>,
+) -> String {
+    if let Some(reason) = empty_reason {
+        return format!("{}\n", reason.message());
+    }
+
     let mut out = String::new();
 
     for band in bands {
@@ -640,12 +671,7 @@ fn bands_text(bands: &[SessionBand], overlaps: &[BandOverlap]) -> String {
             definition.derivation().reasoning()
         ));
         for segment in band.segments() {
-            let state = match segment.state {
-                BandState::Trading => "trading",
-                BandState::NotTrading => "not trading",
-                BandState::Unknown => "unknown",
-                _ => "unrecognized",
-            };
+            let state = prose(segment.state.as_str());
             out.push_str(&format!(
                 "  {} .. {}  {state}\n",
                 show(segment.interval.start),
@@ -682,12 +708,7 @@ fn bands_text(bands: &[SessionBand], overlaps: &[BandOverlap]) -> String {
             overlap.derivation().reasoning()
         ));
         for segment in overlap.segments() {
-            let state = match segment.state {
-                OverlapState::Overlapping => "overlapping",
-                OverlapState::NotOverlapping => "not overlapping",
-                OverlapState::Unknown => "unknown",
-                _ => "unrecognized",
-            };
+            let state = prose(segment.state.as_str());
             out.push_str(&format!(
                 "    {} .. {}  {state}  uncertainty: {}\n",
                 show(segment.interval.start),

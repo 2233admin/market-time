@@ -15,6 +15,37 @@ fn fixture() -> String {
         .to_string()
 }
 
+/// A one-venue dataset that declares no `bands` array at all — just enough scaffolding to
+/// load, with nothing for the `bands` command to derive.
+fn dataset_with_no_bands() -> String {
+    r#"{
+      "revisions": [{"id": "r1", "assembled_at": "2026-01-01T00:00:00Z"}],
+      "venues": [
+        {
+          "venue": "V1", "home_zone": "UTC",
+          "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-01-08T00:00:00Z"},
+          "rules": [{
+            "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+            "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+            "applies": {"start": "2026-01-01", "end": "2026-01-07"},
+            "boundary_uncertainty": {"type": "exact"},
+            "evidence": {"source_url": "https://synthetic.test/v1", "fetched_at": "2026-01-01T00:00:00Z", "effective_from": "2026-01-01"},
+            "revision": "r1"
+          }]
+        }
+      ]
+    }"#
+    .to_owned()
+}
+
+/// Writes `contents` under Cargo's per-test-binary tmp dir and returns the path, so a test
+/// can point `--dataset` at a fixture that does not live under `fixtures/` on disk.
+fn write_temp_dataset(name: &str, contents: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    std::fs::write(&path, contents).expect("temp dataset writes");
+    path.display().to_string()
+}
+
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_market-time"))
         .args(args)
@@ -671,6 +702,21 @@ fn no_bands_suppresses_the_svg_band_section_too() {
     assert!(svg.trim_start().starts_with("<svg"), "{svg}");
     assert!(svg.contains("</svg>"), "{svg}");
     assert!(!svg.contains("DERIVED"), "{svg}");
+}
+
+#[test]
+fn bands_text_says_so_when_the_dataset_declares_no_bands() {
+    let dataset = write_temp_dataset("no-bands.json", &dataset_with_no_bands());
+    let output = run(&["bands", "--dataset", &dataset]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert_eq!(
+        text.trim_end(),
+        "this dataset declares no session bands",
+        "the bands command exists to talk about bands, so an empty result must say why \
+         rather than printing a bare blank line: {text:?}"
+    );
 }
 
 #[test]

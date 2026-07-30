@@ -639,24 +639,23 @@ pub(crate) fn overlap_label(overlap: &BandOverlap) -> String {
     format!("{left} x {right}")
 }
 
+/// Turns a stable identifier — [`BandState::as_str`] or [`OverlapState::as_str`]'s
+/// convention — into words for a person to read: `"not_trading"` becomes `"not trading"`.
+/// The one place in this crate that does that transform, so a status column or a hover
+/// title reads the vocabulary from the core rather than this crate re-matching either enum
+/// to spell out its own copy of the same words.
+fn word(identifier: &str) -> String {
+    identifier.replace('_', " ")
+}
+
 /// The word a [`BandState`] renders as in a status column or a hover title.
-pub(crate) fn band_state_word(state: BandState) -> &'static str {
-    match state {
-        BandState::Trading => "trading",
-        BandState::NotTrading => "not trading",
-        BandState::Unknown => "unknown",
-        _ => "unrecognized",
-    }
+pub(crate) fn band_state_word(state: BandState) -> String {
+    word(state.as_str())
 }
 
 /// The word an [`OverlapState`] renders as in a status column or a hover title.
-pub(crate) fn overlap_state_word(state: OverlapState) -> &'static str {
-    match state {
-        OverlapState::Overlapping => "overlapping",
-        OverlapState::NotOverlapping => "not overlapping",
-        OverlapState::Unknown => "unknown",
-        _ => "unrecognized",
-    }
+pub(crate) fn overlap_state_word(state: OverlapState) -> String {
+    word(state.as_str())
 }
 
 fn band_segment_at(band: &SessionBand, at: UtcInstant) -> Option<&BandSegment> {
@@ -719,7 +718,7 @@ fn band_status(band: &SessionBand, now: Option<&NowMarker>) -> String {
         return String::new();
     };
     match band_segment_at(band, now.instant) {
-        Some(segment) => band_state_word(segment.state).to_owned(),
+        Some(segment) => band_state_word(segment.state),
         None => "not shown".to_owned(),
     }
 }
@@ -729,7 +728,7 @@ fn overlap_status(overlap: &BandOverlap, now: Option<&NowMarker>) -> String {
         return String::new();
     };
     match overlap_segment_at(overlap, now.instant) {
-        Some(segment) => overlap_state_word(segment.state).to_owned(),
+        Some(segment) => overlap_state_word(segment.state),
         None => "not shown".to_owned(),
     }
 }

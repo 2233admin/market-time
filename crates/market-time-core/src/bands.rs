@@ -123,6 +123,27 @@ pub enum BandState {
     Unknown,
 }
 
+impl BandState {
+    /// A stable, lowercase identifier, for datasets and machine consumers — the band-level
+    /// counterpart of [`crate::Phase::as_str`]. Shells needing prose spacing (`"not
+    /// trading"` rather than `"not_trading"`) derive it from this in one place, rather than
+    /// re-matching the variants themselves.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Trading => "trading",
+            Self::NotTrading => "not_trading",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl fmt::Display for BandState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// One atomic stretch of a [`SessionBand`]: a state, plus who is trading and who is
 /// unknown.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,28 +364,96 @@ fn widen_optional(a: Option<Uncertainty>, b: Option<Uncertainty>) -> Option<Unce
     }
 }
 
+/// A segment that [`merge_adjacent`] can fold into its predecessor.
+///
+/// `merge_band_segments` and `merge_overlap_segments` used to walk their `Vec` by hand,
+/// identically apart from two things: what makes two segments agree, and which fields carry
+/// the interval and the uncertainty to widen. This trait names exactly those two
+/// differences so the walk itself — advance while adjacent and agreeing, otherwise start a
+/// new segment — is written once.
+trait MergeableSegment: Sized {
+    /// The stretch this segment occupies.
+    fn interval(&self) -> Interval;
+    /// Widens this segment's interval to end where the neighbour being merged away ended.
+    fn extend_to(&mut self, end: UtcInstant);
+    /// This segment's uncertainty, read so it can be widened with the neighbour's.
+    fn uncertainty(&self) -> Option<Uncertainty>;
+    /// Replaces this segment's uncertainty with the widened value.
+    fn set_uncertainty(&mut self, value: Option<Uncertainty>);
+    /// Whether `self` and `next` agree on everything but the interval, and may therefore be
+    /// merged into one segment.
+    fn agrees_with(&self, next: &Self) -> bool;
+}
+
+impl MergeableSegment for BandSegment {
+    fn interval(&self) -> Interval {
+        self.interval
+    }
+    fn extend_to(&mut self, end: UtcInstant) {
+        self.interval.end = end;
+    }
+    fn uncertainty(&self) -> Option<Uncertainty> {
+        self.uncertainty.clone()
+    }
+    fn set_uncertainty(&mut self, value: Option<Uncertainty>) {
+        self.uncertainty = value;
+    }
+    fn agrees_with(&self, next: &Self) -> bool {
+        self.state == next.state
+            && self.venues_trading == next.venues_trading
+            && self.venues_unknown == next.venues_unknown
+    }
+}
+
+impl MergeableSegment for OverlapSegment {
+    fn interval(&self) -> Interval {
+        self.interval
+    }
+    fn extend_to(&mut self, end: UtcInstant) {
+        self.interval.end = end;
+    }
+    fn uncertainty(&self) -> Option<Uncertainty> {
+        self.uncertainty.clone()
+    }
+    fn set_uncertainty(&mut self, value: Option<Uncertainty>) {
+        self.uncertainty = value;
+    }
+    fn agrees_with(&self, next: &Self) -> bool {
+        self.state == next.state
+    }
+}
+
+/// Merges adjacent segments that [`MergeableSegment::agrees_with`] their predecessor,
+/// widening uncertainty across every merge with [`widen_optional`].
+///
+/// Shared by `merge_band_segments` and `merge_overlap_segments`. A pair only merges when
+/// they are also adjacent — `previous`'s interval ends exactly where the next one starts —
+/// so this never merges across a gap, even if two non-adjacent segments happen to agree on
+/// everything `agrees_with` checks.
+fn merge_adjacent<T: MergeableSegment>(segments: Vec<T>) -> Vec<T> {
+    let mut merged: Vec<T> = Vec::with_capacity(segments.len());
+    for segment in segments {
+        if let Some(previous) = merged.last_mut()
+            && previous.interval().end == segment.interval().start
+            && previous.agrees_with(&segment)
+        {
+            let widened = widen_optional(previous.uncertainty(), segment.uncertainty());
+            previous.extend_to(segment.interval().end);
+            previous.set_uncertainty(widened);
+            continue;
+        }
+        merged.push(segment);
+    }
+    merged
+}
+
 /// Merges adjacent slices that agree on state, trading venues, and unknown venues.
 ///
 /// The band-level counterpart of `Timeline`'s "an always-on venue is one segment, not
 /// seven": a stretch that does not change state should not be split into many segments
 /// purely because two different members' boundaries happened to land inside it.
 fn merge_band_segments(segments: Vec<BandSegment>) -> Vec<BandSegment> {
-    let mut merged: Vec<BandSegment> = Vec::with_capacity(segments.len());
-    for segment in segments {
-        if let Some(previous) = merged.last_mut()
-            && previous.interval.end == segment.interval.start
-            && previous.state == segment.state
-            && previous.venues_trading == segment.venues_trading
-            && previous.venues_unknown == segment.venues_unknown
-        {
-            previous.interval.end = segment.interval.end;
-            previous.uncertainty =
-                widen_optional(previous.uncertainty.clone(), segment.uncertainty);
-            continue;
-        }
-        merged.push(segment);
-    }
-    merged
+    merge_adjacent(segments)
 }
 
 /// Whether two bands are simultaneously trading over a stretch of time.
@@ -381,6 +470,26 @@ pub enum OverlapState {
     /// overlap ("An input is out of coverage", session-overlap spec), so an unknown input
     /// always wins.
     Unknown,
+}
+
+impl OverlapState {
+    /// A stable, lowercase identifier, for datasets and machine consumers — the overlap-level
+    /// counterpart of [`crate::Phase::as_str`]. Shells needing prose spacing derive it from
+    /// this in one place, rather than re-matching the variants themselves.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Overlapping => "overlapping",
+            Self::NotOverlapping => "not_overlapping",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl fmt::Display for OverlapState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// One atomic stretch of a [`BandOverlap`].
@@ -551,20 +660,7 @@ fn derivation_note(reasoning: &str) -> Result<DerivationNote, BandError> {
 
 /// Merges adjacent overlap slices that agree on state.
 fn merge_overlap_segments(segments: Vec<OverlapSegment>) -> Vec<OverlapSegment> {
-    let mut merged: Vec<OverlapSegment> = Vec::with_capacity(segments.len());
-    for segment in segments {
-        if let Some(previous) = merged.last_mut()
-            && previous.interval.end == segment.interval.start
-            && previous.state == segment.state
-        {
-            previous.interval.end = segment.interval.end;
-            previous.uncertainty =
-                widen_optional(previous.uncertainty.clone(), segment.uncertainty);
-            continue;
-        }
-        merged.push(segment);
-    }
-    merged
+    merge_adjacent(segments)
 }
 
 /// Why a band or an overlap could not be derived.
@@ -721,5 +817,22 @@ mod tests {
             segment(10, 20, BandState::NotTrading, Some(Uncertainty::minutes(1))),
         ];
         assert_eq!(merge_band_segments(segments).len(), 2);
+    }
+
+    #[test]
+    fn merge_adjacent_does_not_merge_across_a_gap() {
+        // Same state, same (empty) venue sets — `agrees_with` alone would say yes — but the
+        // first segment ends at 10 and the second starts at 20, not 10, so the shared
+        // `merge_adjacent` walk must still refuse to bridge them.
+        let segments = vec![
+            segment(0, 10, BandState::Trading, Some(Uncertainty::minutes(1))),
+            segment(20, 30, BandState::Trading, Some(Uncertainty::minutes(1))),
+        ];
+        let merged = merge_band_segments(segments);
+        assert_eq!(
+            merged.len(),
+            2,
+            "a gap between 10 and 20 must not be merged away"
+        );
     }
 }
