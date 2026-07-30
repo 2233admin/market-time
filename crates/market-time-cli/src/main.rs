@@ -12,11 +12,15 @@ use market_time_board::{BoardRow, BoardView, ClockDiscipline, NowMarker, Segment
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
 use market_time_core::{
+    BandDefinition, BandId, BandOverlap, BandSegment, BandState, OverlapSegment, OverlapState,
+    SessionBand, derive_band, derive_overlap,
+};
+use market_time_core::{
     CivilInstant, CivilResolution, IanaZoneId, Phase, PhaseOutcome, Ruleset, resolve_phase,
     resolve_timeline,
 };
 use market_time_core::{Interval, UtcInstant};
-use market_time_data::load_ruleset;
+use market_time_data::load_dataset;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -30,6 +34,7 @@ USAGE
   market-time evidence --dataset <path>  --venue <id> [--at <rfc3339|now>] [--format text|json]
   market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg]
   market-time timeline --dataset <path>  --venue <id> [--at <rfc3339|now>] [--hours <n>] [--format text|json]
+  market-time bands    --dataset <path> [--band <id>]... [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time venues   --dataset <path>
 
 NOTES
@@ -50,6 +55,12 @@ NOTES
 
   --format json is the shape for machines. Uncertainty and unknown are fields there, not
   prose: an unknown answer has \"phase\": null and a stated reason, never \"closed\".
+
+  `bands` derives the dataset's session bands (never a published fact — see
+  BandDefinition's derivation note) over the same --at/--hours window as `timeline`.
+  --band <id> may repeat; omitted, every band in the dataset is derived. With two or more
+  selected bands, every unordered pair is also reported as a computed overlap: an unknown
+  band always wins over \"not overlapping\", it never proves an overlap's absence.
 ";
 
 fn main() -> ExitCode {
@@ -76,18 +87,20 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 
     let options = Options::parse(&args[1..])?;
-    let dataset = options
+    let dataset_path = options
         .dataset
         .clone()
         .ok_or_else(|| "--dataset <path> is required".to_owned())?;
-    let ruleset = load_ruleset(&dataset).map_err(|error| error.to_string())?;
+    let dataset = load_dataset(&dataset_path).map_err(|error| error.to_string())?;
+    let ruleset = &dataset.ruleset;
     let now = options.resolve_now()?;
 
     match command {
-        "phase" => phase_command(&ruleset, &options, now),
-        "evidence" => evidence_command(&ruleset, &options, now),
-        "board" => board_command(&ruleset, &options, now),
-        "timeline" => timeline_command(&ruleset, &options, now),
+        "phase" => phase_command(ruleset, &options, now),
+        "evidence" => evidence_command(ruleset, &options, now),
+        "board" => board_command(ruleset, &options, now),
+        "timeline" => timeline_command(ruleset, &options, now),
+        "bands" => bands_command(ruleset, &dataset.bands, &options, now),
         "venues" => Ok(ruleset
             .venues()
             .iter()
@@ -419,6 +432,229 @@ fn timeline_command(
     Ok(out)
 }
 
+/// Derives the dataset's session bands over the `timeline` window, and every unordered
+/// pairwise overlap between the selected bands.
+///
+/// A band and an overlap are never published facts (`bands.rs`'s module docs): both carry
+/// a derivation note, and this shell prints it every time, so nothing here can be
+/// mistaken for something a venue announced. With one band selected there is no pair to
+/// overlap, so no overlap section is printed at all — a lone band overlapping itself is
+/// not a meaningful question, and `derive_overlap` refuses it for the same reason.
+fn bands_command(
+    ruleset: &Ruleset,
+    definitions: &[BandDefinition],
+    options: &Options,
+    now: NowMarker,
+) -> Result<String, String> {
+    let selected = options.select_bands(definitions)?;
+    let interval = options.window(now.instant)?;
+
+    let mut bands: Vec<SessionBand> = Vec::with_capacity(selected.len());
+    for definition in &selected {
+        let timelines: Vec<_> = definition
+            .members()
+            .iter()
+            .map(|venue| resolve_timeline(interval, venue, ruleset))
+            .collect();
+        bands.push(derive_band(definition, &timelines).map_err(|error| error.to_string())?);
+    }
+
+    let mut overlaps: Vec<BandOverlap> = Vec::new();
+    for (index, left) in bands.iter().enumerate() {
+        for right in &bands[index + 1..] {
+            overlaps.push(derive_overlap(left, right).map_err(|error| error.to_string())?);
+        }
+    }
+
+    if options.format == Format::Json {
+        return Ok(pretty(&bands_json(&bands, &overlaps)));
+    }
+
+    Ok(bands_text(&bands, &overlaps))
+}
+
+/// The machine shape of the `bands` command: every selected band, then every pairwise
+/// overlap, each carrying `"derived": true` and its reasoning so a consumer can never
+/// mistake either for a venue-published fact.
+fn bands_json(bands: &[SessionBand], overlaps: &[BandOverlap]) -> Value {
+    json!({
+        "bands": bands.iter().map(band_json).collect::<Vec<Value>>(),
+        "overlaps": overlaps.iter().map(overlap_json).collect::<Vec<Value>>(),
+    })
+}
+
+fn band_json(band: &SessionBand) -> Value {
+    let definition = band.definition();
+    json!({
+        "id": definition.id().to_string(),
+        "display_name": definition.display_name(),
+        "members": definition
+            .members()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>(),
+        "derived": true,
+        "reasoning": definition.derivation().reasoning(),
+        "interval": {"start": show(band.interval().start), "end": show(band.interval().end)},
+        "segments": band.segments().iter().map(band_segment_json).collect::<Vec<Value>>(),
+    })
+}
+
+fn band_segment_json(segment: &BandSegment) -> Value {
+    json!({
+        "start": show(segment.interval.start),
+        "end": show(segment.interval.end),
+        "state": band_state_str(segment.state),
+        "uncertainty": segment.uncertainty.as_ref().map(ToString::to_string),
+        "venues_trading": segment.venues_trading.iter().map(ToString::to_string).collect::<Vec<String>>(),
+        "venues_unknown": segment.venues_unknown.iter().map(ToString::to_string).collect::<Vec<String>>(),
+    })
+}
+
+fn overlap_json(overlap: &BandOverlap) -> Value {
+    json!({
+        "bands": overlap.bands().iter().map(ToString::to_string).collect::<Vec<String>>(),
+        "derived": true,
+        "reasoning": overlap.derivation().reasoning(),
+        "interval": {"start": show(overlap.interval().start), "end": show(overlap.interval().end)},
+        "segments": overlap.segments().iter().map(overlap_segment_json).collect::<Vec<Value>>(),
+    })
+}
+
+fn overlap_segment_json(segment: &OverlapSegment) -> Value {
+    json!({
+        "start": show(segment.interval.start),
+        "end": show(segment.interval.end),
+        "state": overlap_state_str(segment.state),
+        "uncertainty": segment.uncertainty.as_ref().map(ToString::to_string),
+    })
+}
+
+fn band_state_str(state: BandState) -> &'static str {
+    match state {
+        BandState::Trading => "trading",
+        BandState::NotTrading => "not_trading",
+        BandState::Unknown => "unknown",
+        // The vocabulary is closed and owned by the core; this shell cannot extend it. A
+        // state added to the core after this build renders as "unrecognized" rather than
+        // silently as one of the known three.
+        _ => "unrecognized",
+    }
+}
+
+fn overlap_state_str(state: OverlapState) -> &'static str {
+    match state {
+        OverlapState::Overlapping => "overlapping",
+        OverlapState::NotOverlapping => "not_overlapping",
+        OverlapState::Unknown => "unknown",
+        _ => "unrecognized",
+    }
+}
+
+/// The phrase for a slice with no uncertainty to report at all — every contributing
+/// member is itself unknown there (`BandSegment::uncertainty`'s doc comment). This must
+/// never read "exact": nothing here narrows to a claim that precise, the honest reading is
+/// that no schedule is known for the stretch at all.
+fn uncertainty_text(uncertainty: Option<&market_time_core::Uncertainty>) -> String {
+    match uncertainty {
+        Some(uncertainty) => uncertainty.to_string(),
+        None => "no schedule known for this stretch".to_owned(),
+    }
+}
+
+/// Renders the venues in a segment as a joined list, or a placeholder when there are none
+/// to name — never a bare empty string a reader might mistake for missing output.
+fn venue_list(venues: &[VenueId]) -> String {
+    if venues.is_empty() {
+        "none".to_owned()
+    } else {
+        venues
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn bands_text(bands: &[SessionBand], overlaps: &[BandOverlap]) -> String {
+    let mut out = String::new();
+
+    for band in bands {
+        let definition = band.definition();
+        out.push_str(&format!(
+            "band {}: {}\n",
+            definition.id(),
+            definition.display_name()
+        ));
+        out.push_str(&format!(
+            "  members  {}\n",
+            venue_list(definition.members())
+        ));
+        out.push_str(&format!(
+            "  derived  {}\n",
+            definition.derivation().reasoning()
+        ));
+        for segment in band.segments() {
+            let state = match segment.state {
+                BandState::Trading => "trading",
+                BandState::NotTrading => "not trading",
+                BandState::Unknown => "unknown",
+                _ => "unrecognized",
+            };
+            out.push_str(&format!(
+                "  {} .. {}  {state}\n",
+                show(segment.interval.start),
+                show(segment.interval.end),
+            ));
+            out.push_str(&format!(
+                "    trading  {}\n",
+                venue_list(&segment.venues_trading)
+            ));
+            if !segment.venues_unknown.is_empty() {
+                out.push_str(&format!(
+                    "    unknown  {}\n",
+                    venue_list(&segment.venues_unknown)
+                ));
+            }
+            out.push_str(&format!(
+                "    uncertainty  {}\n",
+                uncertainty_text(segment.uncertainty.as_ref())
+            ));
+        }
+        out.push('\n');
+    }
+
+    if overlaps.is_empty() {
+        return out.trim_end_matches('\n').to_owned() + "\n";
+    }
+
+    out.push_str("overlaps\n");
+    for overlap in overlaps {
+        let [left, right] = overlap.bands();
+        out.push_str(&format!("  {left} x {right}\n"));
+        out.push_str(&format!(
+            "  derived  {}\n",
+            overlap.derivation().reasoning()
+        ));
+        for segment in overlap.segments() {
+            let state = match segment.state {
+                OverlapState::Overlapping => "overlapping",
+                OverlapState::NotOverlapping => "not overlapping",
+                OverlapState::Unknown => "unknown",
+                _ => "unrecognized",
+            };
+            out.push_str(&format!(
+                "    {} .. {}  {state}  uncertainty: {}\n",
+                show(segment.interval.start),
+                show(segment.interval.end),
+                uncertainty_text(segment.uncertainty.as_ref()),
+            ));
+        }
+    }
+
+    out
+}
+
 /// How an answer is written down. Presentation only; the answer is the same either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -433,6 +669,7 @@ enum Format {
 struct Options {
     dataset: Option<PathBuf>,
     venue: Option<String>,
+    bands: Vec<String>,
     at: Option<String>,
     at_zone: Option<String>,
     zone: String,
@@ -446,6 +683,7 @@ impl Options {
         let mut options = Self {
             dataset: None,
             venue: None,
+            bands: Vec::new(),
             at: None,
             at_zone: None,
             zone: "UTC".to_owned(),
@@ -465,6 +703,7 @@ impl Options {
             match flag {
                 "--dataset" => options.dataset = Some(PathBuf::from(value()?)),
                 "--venue" => options.venue = Some(value()?),
+                "--band" => options.bands.push(value()?),
                 "--at" => options.at = Some(value()?),
                 "--at-zone" => options.at_zone = Some(value()?),
                 "--zone" => options.zone = value()?,
@@ -494,6 +733,32 @@ impl Options {
         }
 
         Ok(options)
+    }
+
+    /// The bands to derive: the ones named by `--band`, in the order given, or every band
+    /// the dataset declares when none was named.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `--band` names an id blank, or one this dataset does not
+    /// declare — the same "fail loudly" stance `required_venue` takes for an unknown
+    /// venue, rather than silently deriving fewer bands than were asked for.
+    fn select_bands(&self, definitions: &[BandDefinition]) -> Result<Vec<BandDefinition>, String> {
+        if self.bands.is_empty() {
+            return Ok(definitions.to_vec());
+        }
+
+        self.bands
+            .iter()
+            .map(|requested| {
+                let id = BandId::new(requested).map_err(|error| error.to_string())?;
+                definitions
+                    .iter()
+                    .find(|definition| definition.id() == &id)
+                    .cloned()
+                    .ok_or_else(|| format!("no band named {requested:?} in this dataset"))
+            })
+            .collect()
     }
 
     /// The venues to answer for: the one that was named, or every venue in the dataset.

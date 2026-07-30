@@ -11,8 +11,17 @@ calls and renders. See `README.md` for the rules shared across all three contrac
 |---|---|---|
 | `market-time phase --venue <ID> --at <INSTANT>` | Single-venue phase query | `resolve_phase` |
 | `market-time phases [--venues <ID,ID,...>] --at <INSTANT>` | Multi-venue query; defaults to all tracked venues | `resolve_phases` |
+| `market-time bands [--band <ID>]... --at <INSTANT>` | Derives the dataset's session bands, and every unordered pair of the selected bands as a computed overlap; defaults to every band the dataset declares | `derive_band`, `derive_overlap` |
 | `market-time venues` | List tracked venues and each one's declared coverage | none (reads `Ruleset` metadata only) |
 | `market-time revisions` | List the dataset revisions the loaded `Ruleset` reports | none (reads `Ruleset` metadata only) |
+
+`bands` reads `--at`/window arguments the same way `timeline` does — this contract does not
+introduce a second spelling for "an instant plus a span". A band and an overlap are never
+published facts (`bands.rs`'s module docs): both outputs carry the underlying
+`DerivationNote`'s reasoning, in both `--format text` and `--format json`, so neither can be
+mistaken for something a venue announced. An unknown member never narrows a band's answer —
+the whole band reads unknown for that stretch — and an unknown band never proves an
+overlap's absence; both rules hold in the CLI output exactly as they hold in the core.
 
 Evidence and uncertainty are never behind a separate command or a flag — they are fields on the
 `phase`/`phases` output, always present (see README rule 4). There is no "quiet" output mode that

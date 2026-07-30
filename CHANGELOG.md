@@ -30,14 +30,28 @@ ships here, now or ever.
   - `Ruleset::from_parts`, which validates once: revisions exist, rules sit inside coverage,
     and every date inside coverage has a rule.
   - `resolve_phase`, `resolve_phases`, and `resolve_timeline`.
+  - Regional session bands: `BandDefinition`, `SessionBand`, `BandOverlap`, `derive_band`,
+    and `derive_overlap`. A band is never a published fact — it carries a `DerivationNote`
+    naming why its members were grouped, never evidence of its own — and an unknown member
+    is never dropped from the vote: the whole band reads unknown for that stretch rather
+    than narrowing to what the remaining members say. Uncertainty only ever widens across a
+    band's or an overlap's contributors, and an unknown band can never prove an overlap's
+    absence.
 - **`market-time-scales`** — the one leap-second seam. TAI and GPS to UTC through hifitime's
   IERS table, in integer nanoseconds.
 - **`market-time-data`** — the only crate that opens a file. JSON dataset format, with the
-  phase vocabulary enforced at load.
-- **`market-time-cli`** — `phase`, `evidence`, `timeline`, `board`, and `venues`. Reads the
-  clock so the core never does, and reports the host clock's discipline as unmeasured rather
-  than inventing a bound. `--format json` for machine consumers: an unknown is
-  `"phase": null` with a stated reason, never `"closed"`.
+  phase vocabulary enforced at load. Session bands are loadable too: a `bands` array on the
+  dataset file, each entry checked against that same file's venues (a band may not name a
+  venue the dataset cannot answer for) and against duplicate ids, with `derived_reasoning`
+  required rather than optional — a band with no stated reasoning cannot be expressed.
+- **`market-time-cli`** — `phase`, `evidence`, `timeline`, `board`, `bands`, and `venues`.
+  Reads the clock so the core never does, and reports the host clock's discipline as
+  unmeasured rather than inventing a bound. `--format json` for machine consumers: an
+  unknown is `"phase": null` with a stated reason, never `"closed"`. `bands` derives the
+  dataset's session bands over the same `--at`/`--hours` window `timeline` uses, and every
+  unordered pair of the selected bands as a computed overlap — both carry their derivation
+  note into the output, text or JSON, so neither can be mistaken for a venue-published
+  window.
 - **`market-time-board`** — the timeline board. One row per venue, phases across a shared
   axis, a marker on the instant being viewed, the viewer's zone as axis labelling only.
   Unknown renders distinctly from closed. `inspect` returns what a segment rests on, and the
@@ -60,7 +74,9 @@ ships here, now or ever.
   venues are trading with not-known counted separately.
 - A synthetic three-venue fixture at
   `crates/market-time-data/fixtures/synthetic-venues.json`, so the tool can be run and
-  verified without data anyone is forbidden to redistribute.
+  verified without data anyone is forbidden to redistribute. Its two session bands are
+  synthetic groupings too — invented for this fixture so `bands` has something to derive
+  and overlap, not any real desk's session definition.
 
 ### Governance
 

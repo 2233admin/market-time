@@ -442,3 +442,165 @@ fn the_board_can_be_written_as_svg() {
         "the honesty note travels with the picture"
     );
 }
+
+#[test]
+fn bands_text_names_every_bands_derivation_and_reports_a_real_overlap() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T00:00:00Z",
+        "--hours",
+        "24",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(
+        text.contains("band band-regional-equities: Regional Equities Session"),
+        "{text}"
+    );
+    assert!(
+        text.contains("not any real desk's grouping"),
+        "the band's derivation note is printed, not just its id: {text}"
+    );
+    assert!(
+        text.contains("band band-continuous-markets: Continuous Markets"),
+        "{text}"
+    );
+    assert!(
+        text.contains("overlaps"),
+        "two bands means an overlap section: {text}"
+    );
+    assert!(
+        text.contains("computed as the overlap of session bands"),
+        "the overlap's own derivation note is printed too, so it cannot read as published: {text}"
+    );
+    assert!(
+        text.contains("overlapping"),
+        "the two synthetic day sessions plus the always-on venue must produce a real \
+         overlap window: {text}"
+    );
+    assert!(
+        text.contains("not overlapping"),
+        "and real gaps too — this must not read as one 24-hour block: {text}"
+    );
+}
+
+#[test]
+fn bands_json_marks_every_band_and_overlap_derived_and_never_renders_a_null_uncertainty_as_exact() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2030-01-01T00:00:00Z",
+        "--hours",
+        "24",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("json output parses");
+
+    let bands = value["bands"].as_array().expect("a list of bands");
+    assert_eq!(bands.len(), 2, "{value}");
+    for band in bands {
+        assert_eq!(band["derived"], true, "{band}");
+        assert!(
+            band["reasoning"].as_str().is_some_and(|r| !r.is_empty()),
+            "{band}"
+        );
+    }
+
+    let overlaps = value["overlaps"].as_array().expect("a list of overlaps");
+    assert_eq!(
+        overlaps.len(),
+        1,
+        "exactly one pair from two bands: {value}"
+    );
+    assert_eq!(overlaps[0]["derived"], true, "{value}");
+
+    // 2030 is past every synthetic venue's declared coverage, so every segment here is
+    // unknown, and every member is unknown too: `BandSegment::uncertainty` is `None` for
+    // exactly that stretch (see its doc comment), which must reach the JSON as `null`,
+    // never dropped and never printed as though it were exact.
+    let regional = bands
+        .iter()
+        .find(|band| band["id"] == "band-regional-equities")
+        .expect("band-regional-equities is in the output");
+    let segments = regional["segments"].as_array().expect("segments");
+    assert!(
+        segments
+            .iter()
+            .any(|segment| segment["state"] == "unknown" && segment["uncertainty"].is_null()),
+        "{value}"
+    );
+    assert!(
+        !stdout(&output).contains("\"uncertainty\": \"exact\""),
+        "at this instant every synthetic venue is out of coverage, so nothing here is \
+         known precisely enough to say exact; a null uncertainty must never render as it"
+    );
+}
+
+#[test]
+fn selecting_one_band_prints_no_overlap_section() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T00:00:00Z",
+        "--hours",
+        "24",
+        "--band",
+        "band-continuous-markets",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(text.contains("band-continuous-markets"), "{text}");
+    assert!(
+        !text.contains("overlaps"),
+        "a lone band has no pair to overlap with: {text}"
+    );
+
+    let json_output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T00:00:00Z",
+        "--hours",
+        "24",
+        "--band",
+        "band-continuous-markets",
+        "--format",
+        "json",
+    ]);
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout(&json_output)).expect("json output parses");
+    assert_eq!(value["bands"].as_array().map(Vec::len), Some(1), "{value}");
+    assert_eq!(
+        value["overlaps"].as_array().map(Vec::len),
+        Some(0),
+        "{value}"
+    );
+}
+
+#[test]
+fn an_unknown_band_id_fails_loudly() {
+    let output = run(&["bands", "--dataset", &fixture(), "--band", "no-such-band"]);
+    assert!(
+        !output.status.success(),
+        "an unknown band must not be silently ignored"
+    );
+    assert!(
+        stderr(&output).contains("no band named"),
+        "{}",
+        stderr(&output)
+    );
+}

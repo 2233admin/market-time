@@ -8,7 +8,14 @@
     "verified end to end without anyone needing data they may not have.",
     "The three venues exercise three structurally different market models: auctions plus a",
     "mid-day break, a daylight-saving zone whose open is a process, and an always-on venue",
-    "with scheduled events that are not phases."
+    "with scheduled events that are not phases.",
+    "The two bands below are likewise invented for this repository: no desk publishes",
+    "'Regional Equities Session' or 'Continuous Markets' as a named grouping. They exist so",
+    "the CLI's bands command has something real to derive and overlap; SYNTH-AUCT and",
+    "SYNTH-DST never trade at the same UTC hour, so band-regional-equities is trading",
+    "whenever either one is, and since SYNTH-ALWAYS never stops, the overlap between the",
+    "two bands lands exactly on band-regional-equities' own trading windows — three genuine,",
+    "part-of-day overlap stretches, not an empty result and not a full 24-hour block."
   ],
   "revisions": [
     {
@@ -205,6 +212,20 @@
           "revision": "synthetic-2026-07-30"
         }
       ]
+    }
+  ],
+  "bands": [
+    {
+      "id": "band-regional-equities",
+      "display_name": "Regional Equities Session",
+      "members": ["SYNTH-AUCT", "SYNTH-DST"],
+      "derived_reasoning": "grouped as a combined regional equities session for this fixture's overlap demo; not any real desk's grouping, and not published by either venue"
+    },
+    {
+      "id": "band-continuous-markets",
+      "display_name": "Continuous Markets",
+      "members": ["SYNTH-ALWAYS"],
+      "derived_reasoning": "kept as its own single-member band so the overlap with the equities session is demonstrable; a single venue is not normally called a band, this one is here only to exercise derive_overlap against something that never stops trading"
     }
   ]
 }

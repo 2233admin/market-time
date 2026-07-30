@@ -113,6 +113,7 @@ impl RevisionAssembly {
         let file = DatasetFile {
             revisions: vec![self.revision.clone()],
             venues: self.venues.clone(),
+            bands: Vec::new(),
         };
         serde_json::to_string_pretty(&file).unwrap_or_default()
     }
