@@ -13,3 +13,4 @@ authors.workspace = true
 # jiff, downstream of here, does not model leap seconds at all.
 [dependencies]
 hifitime.workspace = true
+market-time-core = { path = "../market-time-core" }

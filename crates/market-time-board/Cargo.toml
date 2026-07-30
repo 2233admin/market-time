@@ -10,4 +10,9 @@ authors.workspace = true
 
 [dependencies]
 market-time-core = { path = "../market-time-core" }
+jiff.workspace = true
 market-time-data = { path = "../market-time-data" }
+
+[dev-dependencies]
+market-time-data = { path = "../market-time-data" }
+jiff.workspace = true

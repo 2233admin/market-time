@@ -1,0 +1,201 @@
+{
+  "_comment": [
+    "SYNTHETIC DATA. These schedules are invented for this repository; they are not any",
+    "real venue's published calendar. No venue dataset ships from here (DATA-LICENSING.md):",
+    "every launch venue forbids commercial redistribution of its calendar, so real",
+    "schedules are fetched at run time by the operator under the operator's own",
+    "relationship with each venue. This file exists so the CLI and the board can be run and",
+    "verified end to end without anyone needing data they may not have.",
+    "The three venues exercise three structurally different market models: auctions plus a",
+    "mid-day break, a daylight-saving zone whose open is a process, and an always-on venue",
+    "with scheduled events that are not phases."
+  ],
+  "revisions": [
+    {
+      "id": "synthetic-2026-07-30",
+      "supersedes": null,
+      "iana_tzdb_version": "2026c",
+      "assembled_at": "2026-07-30T00:00:00Z"
+    }
+  ],
+  "venues": [
+    {
+      "venue": "SYNTH-AUCT",
+      "home_zone": "Asia/Shanghai",
+      "coverage": { "start": "2026-01-01T00:00:00Z", "end": "2026-12-31T16:00:00Z" },
+      "evidence": [
+        {
+          "source_url": "https://synthetic.test/auct/",
+          "fetched_at": "2026-07-29T00:00:00Z",
+          "effective_from": "2026-01-01",
+          "terms": "synthetic data authored for this repository; no venue terms apply"
+        }
+      ],
+      "rules": [
+        {
+          "kind": { "type": "weekly_pattern", "weekdays": ["mon", "tue", "wed", "thu", "fri"] },
+          "schedule": [
+            { "at": "00:00", "phase": "closed" },
+            { "at": "09:15", "phase": "pre_open" },
+            { "at": "09:25", "phase": "opening_auction" },
+            { "at": "09:30", "phase": "continuous_trading" },
+            { "at": "11:30", "phase": "mid_day_break" },
+            { "at": "13:00", "phase": "continuous_trading" },
+            { "at": "14:57", "phase": "closing_auction" },
+            { "at": "15:00", "phase": "post_close" },
+            { "at": "15:30", "phase": "closed" }
+          ],
+          "applies": { "start": "2026-01-01", "end": "2026-12-31" },
+          "boundary_uncertainty": { "type": "published_granularity", "seconds": 60 },
+          "evidence": {
+            "source_url": "https://synthetic.test/auct/trading-rules",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "revision": "synthetic-2026-07-30"
+        },
+        {
+          "kind": { "type": "weekly_pattern", "weekdays": ["sat", "sun"] },
+          "schedule": [{ "at": "00:00", "phase": "closed" }],
+          "applies": { "start": "2026-01-01", "end": "2026-12-31" },
+          "boundary_uncertainty": { "type": "published_granularity", "seconds": 60 },
+          "evidence": {
+            "source_url": "https://synthetic.test/auct/trading-rules",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "revision": "synthetic-2026-07-30"
+        },
+        {
+          "kind": { "type": "holiday", "name": "Synthetic National Day" },
+          "schedule": [{ "at": "00:00", "phase": "closed" }],
+          "applies": { "start": "2026-10-01", "end": "2026-10-01" },
+          "boundary_uncertainty": { "type": "published_granularity", "seconds": 60 },
+          "evidence": {
+            "source_url": "https://synthetic.test/auct/holidays-2026",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "revision": "synthetic-2026-07-30"
+        }
+      ],
+      "events": []
+    },
+    {
+      "venue": "SYNTH-DST",
+      "home_zone": "America/New_York",
+      "coverage": { "start": "2026-01-01T05:00:00Z", "end": "2026-12-31T05:00:00Z" },
+      "evidence": [
+        {
+          "source_url": "https://synthetic.test/dst/",
+          "fetched_at": "2026-07-29T00:00:00Z",
+          "effective_from": "2026-01-01",
+          "terms": "synthetic data authored for this repository; no venue terms apply"
+        }
+      ],
+      "rules": [
+        {
+          "kind": { "type": "weekly_pattern", "weekdays": ["mon", "tue", "wed", "thu", "fri"] },
+          "schedule": [
+            { "at": "00:00", "phase": "closed" },
+            { "at": "04:00", "phase": "pre_open" },
+            { "at": "09:30", "phase": "continuous_trading" },
+            { "at": "16:00", "phase": "post_close" },
+            { "at": "20:00", "phase": "closed" }
+          ],
+          "applies": { "start": "2026-01-01", "end": "2026-12-30" },
+          "boundary_uncertainty": {
+            "type": "process_start",
+            "process": "the security-by-security opening process"
+          },
+          "evidence": {
+            "source_url": "https://synthetic.test/dst/hours",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "revision": "synthetic-2026-07-30"
+        },
+        {
+          "kind": { "type": "weekly_pattern", "weekdays": ["sat", "sun"] },
+          "schedule": [{ "at": "00:00", "phase": "closed" }],
+          "applies": { "start": "2026-01-01", "end": "2026-12-30" },
+          "boundary_uncertainty": { "type": "published_granularity", "seconds": 60 },
+          "evidence": {
+            "source_url": "https://synthetic.test/dst/hours",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "revision": "synthetic-2026-07-30"
+        },
+        {
+          "kind": { "type": "shortened_session", "name": "Synthetic half day" },
+          "schedule": [
+            { "at": "00:00", "phase": "closed" },
+            { "at": "04:00", "phase": "pre_open" },
+            { "at": "09:30", "phase": "continuous_trading" },
+            { "at": "13:00", "phase": "post_close" },
+            { "at": "17:00", "phase": "closed" }
+          ],
+          "applies": { "start": "2026-11-27", "end": "2026-11-27" },
+          "boundary_uncertainty": { "type": "published_granularity", "seconds": 60 },
+          "evidence": {
+            "source_url": "https://synthetic.test/dst/half-days",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "derived_reasoning": "the notice gives the close but not the post-close end; the ordinary four-hour post-close window is carried over",
+          "revision": "synthetic-2026-07-30"
+        }
+      ],
+      "events": []
+    },
+    {
+      "venue": "SYNTH-ALWAYS",
+      "home_zone": "UTC",
+      "coverage": { "start": "2026-01-01T00:00:00Z", "end": "2027-01-01T00:00:00Z" },
+      "evidence": [
+        {
+          "source_url": "https://synthetic.test/always/",
+          "fetched_at": "2026-07-29T00:00:00Z",
+          "effective_from": "2026-01-01",
+          "terms": "synthetic data authored for this repository; no venue terms apply"
+        }
+      ],
+      "rules": [
+        {
+          "kind": {
+            "type": "weekly_pattern",
+            "weekdays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+          },
+          "schedule": [{ "at": "00:00", "phase": "continuous_trading" }],
+          "applies": { "start": "2026-01-01", "end": "2026-12-31" },
+          "boundary_uncertainty": { "type": "exact" },
+          "evidence": {
+            "source_url": "https://synthetic.test/always/trading-rules",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "revision": "synthetic-2026-07-30"
+        }
+      ],
+      "events": [
+        {
+          "kind": "funding_settlement",
+          "times": ["00:00", "08:00", "16:00"],
+          "applies": { "start": "2026-01-01", "end": "2026-12-31" },
+          "uncertainty": {
+            "type": "published_bound",
+            "seconds": 15,
+            "published_as": "the venue publishes a 15-second deviation"
+          },
+          "evidence": {
+            "source_url": "https://synthetic.test/always/funding",
+            "fetched_at": "2026-07-29T00:00:00Z",
+            "effective_from": "2026-01-01"
+          },
+          "revision": "synthetic-2026-07-30"
+        }
+      ]
+    }
+  ]
+}

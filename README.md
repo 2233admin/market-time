@@ -36,12 +36,43 @@ as data.
 
 ## Status
 
-Pre-alpha. No code has been released yet. The repository carries the ratified constitution, a
-Cargo workspace whose crates are still empty, and the specification of the first delivery slice —
-venue session state for SSE, NYSE, and Binance — in
-[`openspec/changes/venue-session-state/`](openspec/changes/venue-session-state/). Supporting
-research, the data model, and the interface contracts are in
+Pre-alpha, and it runs. The phase engine, the timeline query, the dataset loader, the CLI, and
+the board are implemented and tested; what is not here, and never will be, is venue data. The
+specification of this slice is in
+[`openspec/changes/venue-session-state/`](openspec/changes/venue-session-state/); the research,
+data model, and interface contracts behind it are in
 [`docs/venue-session-state/`](docs/venue-session-state/).
+
+## Try it
+
+The repository ships a **synthetic** dataset — three invented venues that exercise the three
+structural cases (auctions plus a mid-day break, a daylight-saving zone whose open is a process,
+an always-on venue with scheduled events). It is not any real venue's calendar, and it exists so
+the tool can be run without data you may not be allowed to have.
+
+```bash
+cargo run -p market-time-cli -- board --dataset crates/market-time-data/fixtures/synthetic-venues.json --zone Asia/Shanghai --at 2026-07-30T02:00:00Z
+```
+
+```text
+               10:00       14:00       18:00       22:00       02:00       06:00
+SYNTH-ALWAYS  [|#######################################################################]  continuous_trading
+SYNTH-AUCT    [|####::::######__.....................................................-#]  continuous_trading
+SYNTH-DST     [|.................-----------------###################____________......]  closed
+
+  axis: Asia/Shanghai (72 columns)
+  now:  2026-07-30 10:00:00 — instant supplied, not read from a clock (--at on the command line)
+  key:  # trading  = auction  - pre-open  : break  _ post-close  . closed  ! halt  ? not known
+```
+
+`market-time phase` answers one venue with its evidence, its dataset revisions, and the
+uncertainty on each boundary. `market-time timeline` prints the segments a board row is drawn
+from, including the stretches that fall outside coverage — those come back as "not known", never
+as a schedule someone extrapolated.
+
+To answer for a real venue, assemble a dataset revision from that venue's own published schedule
+under your own relationship with it, and point `--dataset` at it. See
+[`DATA-LICENSING.md`](DATA-LICENSING.md) — this repository is a client, not a redistributor.
 
 The board that slice ships is a timeline: one row per venue, that venue's phases laid out across
 the day on a shared axis, a marker on the instant you are looking at. That is the shape global
