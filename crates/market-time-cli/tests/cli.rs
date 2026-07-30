@@ -432,7 +432,11 @@ fn the_board_can_be_written_as_svg() {
         &svg[..60.min(svg.len())]
     );
     assert!(svg.contains("</svg>"));
-    assert!(svg.contains("SYNTH-AUCT"), "a row per venue");
+    assert!(
+        svg.contains("Synthetic Auction Exchange"),
+        "a row per venue, under its display name"
+    );
+    assert!(svg.contains("EQUITIES"), "grouped by asset family");
     assert!(
         svg.contains("an unknown is not a closed market"),
         "the honesty note travels with the picture"
