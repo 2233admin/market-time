@@ -109,3 +109,28 @@ changes — the answer does not.
 randomise its open (it has no single open instant), and Binance's funding deviation is a
 published bound rather than something to estimate. Both are recorded in `research.md` rather
 than quietly edited away, because the reasoning is worth more than the tidiness.
+
+## Post-implementation Constitution Check (2026-07-30)
+
+The gates were checked before research and again after design. This is the third check,
+against code that exists rather than a plan that describes it.
+
+| Gate | Verdict | What it rests on now |
+|---|---|---|
+| **G1 — Evidence (I)** | **PASS, structurally** | `EvidenceRef::new` rejects a blank source or effective date, and `DerivationNote::new` rejects blank reasoning, so "a rule without provenance" and "derived, unexplained" are states the types cannot hold. The loader turns either rejection into a load failure. |
+| **G2 — Instants (II)** | **PASS** | `UtcInstant` is UTC by construction and has no `now()`. Non-UTC input converts in `market-time-scales` alone, through hifitime's IERS table, in integer nanoseconds — the earlier f64 path silently lost the last two digits at 1.7e18 ns and was replaced. |
+| **G3 — Uncertainty (II)** | **PASS** | Every boundary and answer carries an `Uncertainty`. `widest` treats an unbounded case as wider than any number, so combining never sharpens. `PhaseOutcome::Unknown` is a variant, not an error, and reaches JSON as `"phase": null` with a reason. |
+| **G4 — Reproducibility (III)** | **PASS with the stated mitigation** | `tzdb-bundle-always` is on and the release identifier is read from `jiff-tzdb::VERSION` rather than transcribed. Revisions are immutable with a `supersedes` chain; answers name the revisions that produced them; two consecutive runs are byte-identical (recorded in `docs/venue-session-state/quickstart-results.md`). |
+| **G5 — Library-first (IV)** | **PASS, and now enforced mechanically** | Upgraded from the design-time verdict. `tests/no_io_no_clock.rs` fails the build if `market-time-core` gains a dependency outside its allow-list, or if any source file in it names `SystemTime`, a `now()` constructor, `std::fs`, `std::net`, or `std::process`. The promise is a test, not a habit. |
+| **G6 — Golden vectors (V)** | **PASS** | 24 vectors covering both daylight-saving directions, holiday precedence, a shortened session, mid-day break, auctions, funding events, boundary ownership to the nanosecond, coverage edges, multi-venue partial unknowns, and determinism — plus a minute-by-minute tiling sweep across a day. |
+| **G7 — Shared vocabulary** | **PASS** | The vocabulary is a closed `#[non_exhaustive]` enum owned by the core; shells cannot extend it and must handle the wildcard. A dataset naming its own phase fails to load. |
+
+**One gate changed character rather than status.** G5 was a design-time "PASS, structurally"
+resting on the dependency graph. It is now a build failure if violated, which is a different
+kind of guarantee: the reviewer who would have had to notice is no longer load-bearing.
+
+**What the check cannot cover.** G1 and G6 are satisfied against synthetic venues. A rule
+carrying evidence is enforced; whether that evidence describes SSE correctly is a question
+only real data can answer, and the tasks that would answer it are open by design.
+
+**No unjustified violations. Complexity Tracking stays empty.**

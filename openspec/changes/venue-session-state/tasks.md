@@ -38,7 +38,16 @@ answer — so a segment clicked on a future graphical surface and a segment aske
 command line cannot drift apart. `--format json` is available on `phase`, `evidence`, and
 `timeline`; an unknown is `"phase": null` with a stated reason, never `"closed"` (5.10).
 
-Still open: the polish group, and everything gated on real venue data.
+The polish group is closed except for the two items that need real data
+(`7.3` per-venue licensing tiers, `7.4` per-dataset SPDX headers): the quickstart run is
+recorded in `docs/venue-session-state/quickstart-results.md`, the README has a usage
+section, the post-implementation Constitution Check is in `design.md`, and the workspace is
+at 0.1.0 with a `CHANGELOG.md`.
+
+T040-T042 were corrected rather than completed — see the note above task 4.15. They asked
+for datasets to be committed under `data/`, which `DATA-LICENSING.md` forbids and CI blocks.
+What remains is the operator's decision about how real schedules are obtained, and the fetch
+adapter that decision needs.
 
 ## 1. Setup (Shared Infrastructure) (spec-kit Phase 1)
 
@@ -133,9 +142,19 @@ explicit unknown for the fourth.
 - [x] 4.12 [P] [US1] Implement dataset revision loading in `crates/market-time-data/src/revision.rs`, supporting both vendored and fetch-at-run-time sources per each source's licensing tier (research D6) (T037)
 - [x] 4.13 [US1] Implement the CLI `phase` command in `crates/market-time-cli/src/main.rs` per contracts/cli.md, including exit codes distinguishing usage error (2), DST-ambiguous input (3), and data-load failure (4) from the always-0 Known/Unknown outcome (T038)
 - [x] 4.14 [US1] Implement `--at now` in `crates/market-time-cli/src/main.rs` such that the clock is read in the shell, passed into the core, **and the host clock discipline bound is surfaced as uncertainty** (constitution, Domain and Data Constraints) (T039)
-- [ ] 4.15 [US1] Build the SSE dataset revision in `data/sse/` with per-rule evidence and declared coverage (gated on T021 — the two unassigned intervals must be resolved from source first) (T040)
-- [ ] 4.16 [US1] Build the NYSE dataset revision in `data/nyse/` with per-rule evidence and declared coverage (gated on T022 for terms, T024 for the session table) (T041)
-- [ ] 4.17 [US1] Build the Binance dataset revision in `data/binance/` including the **variable** funding recurrence — 8-hourly default, 4-hourly for the named contract subset, hourly under volatility, with reversion thresholds that themselves changed over time. A fixed "every 8 hours" field would be wrong (research D5; gated on T023) (T042)
+**Corrected 2026-07-30.** T040-T042 said "build the dataset revision in `data/sse/`",
+`data/nyse/`, `data/binance/`. That was written before research D6a established that all
+three venues forbid commercial redistribution, and it contradicts two things now in the
+repository: `DATA-LICENSING.md`, and the CI job `no-vendored-venue-data`, which fails the
+build if a `data/` directory exists at all. Committing those datasets is not work that is
+pending — it is work that must never be done. The tasks below replace them with the shape
+that is actually compliant: the operator fetches at run time, under their own relationship
+with each venue, and the tooling helps them assemble a revision from what they fetched.
+
+- [ ] 4.15 [US1] Implement a fetch adapter interface in `crates/market-time-data/src/fetch.rs`: given a registered source (URL, terms recorded at registration, expected format), retrieve the document, record `fetched_at`, and hand back bytes plus provenance. No venue-specific parsing here; this is the seam network access lives behind (replaces T040)
+- [ ] 4.16 [US1] Implement revision assembly in `crates/market-time-data/src/revision.rs`: turn fetched documents plus per-rule evidence into an immutable dataset revision with a `supersedes` chain and a declared coverage range, written to a path the operator chooses and this repository never tracks (replaces T041)
+- [ ] 4.17 [US1] Implement a venue adapter for one venue end to end as the proof the interface is usable — parsing that venue's published schedule into rules with evidence, including the **variable** recurrence case if the venue has one (Binance funding is 8-hourly by default, 4-hourly for a named contract subset, hourly under volatility, with reversion thresholds that themselves changed over time; a fixed "every 8 hours" field would be wrong — research D5). Which venue goes first is an operator decision, not a code one (replaces T042)
+- [ ] 4.18 [US1] Document the operator path in `README.md`: register a source and its terms, fetch, assemble a revision, point `--dataset` at it. The tool is a client; the operator is responsible for their own compliance
 
 **Checkpoint**: User Story 1 fully functional and independently testable. **This is the MVP.**
 
@@ -214,12 +233,12 @@ trading-hours boards establish that shape; the evidence and uncertainty layer is
 
 ## 7. Polish & Cross-Cutting Concerns (spec-kit Phase 6)
 
-- [ ] 7.1 Run the full quickstart validation in `docs/venue-session-state/quickstart.md` and record results (T062)
-- [ ] 7.2 [P] Write `README.md` usage section now that a real interface exists (it currently states pre-alpha with no released code) (T063)
+- [x] 7.1 Run the full quickstart validation in `docs/venue-session-state/quickstart.md` and record results (T062)
+- [x] 7.2 [P] Write `README.md` usage section now that a real interface exists (it currently states pre-alpha with no released code) (T063)
 - [ ] 7.3 [P] Record each venue's licensing tier and its evidence in `DATA-LICENSING.md` (T064)
 - [ ] 7.4 [P] Add `LICENSE-CC0` or per-dataset SPDX headers for original project data, per the DATA-LICENSING three-tier policy — deferred at repo setup because no dataset existed then (T065)
-- [ ] 7.5 Post-implementation Constitution Check: re-verify all seven gates in `openspec/changes/venue-session-state/design.md` against the built system (T066)
-- [ ] 7.6 Bump `VERSION` and update `CHANGELOG.md` for the first release (T067)
+- [x] 7.5 Post-implementation Constitution Check: re-verify all seven gates in `openspec/changes/venue-session-state/design.md` against the built system (T066)
+- [x] 7.6 Bump `VERSION` and update `CHANGELOG.md` for the first release (T067)
 
 ---
 
