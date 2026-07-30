@@ -43,3 +43,7 @@ jiff-tzdb = "0.1"
 # values, so nothing downstream of the loader knows a file format exists.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Content digests for fetched source documents, so provenance names the exact bytes a
+# venue returned rather than only the URL they came from.
+sha2 = "0.10"

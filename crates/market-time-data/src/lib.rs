@@ -23,7 +23,11 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
+pub mod fetch;
 pub mod format;
 pub mod load;
+pub mod revision;
 
+pub use fetch::{FetchError, FetchedDocument, FileFetcher, SourceFetcher, SourceRegistration};
 pub use load::{LoadError, load_ruleset, parse_ruleset};
+pub use revision::{AssemblyError, RevisionAssembly, evidence_from};

@@ -70,9 +70,63 @@ uncertainty on each boundary. `market-time timeline` prints the segments a board
 from, including the stretches that fall outside coverage — those come back as "not known", never
 as a schedule someone extrapolated.
 
-To answer for a real venue, assemble a dataset revision from that venue's own published schedule
-under your own relationship with it, and point `--dataset` at it. See
-[`DATA-LICENSING.md`](DATA-LICENSING.md) — this repository is a client, not a redistributor.
+## Answering for a real venue
+
+No venue data ships here, and none ever will: every launch venue forbids commercial
+redistribution of its published schedule. You assemble a dataset revision yourself, from that
+venue's own publication, under your own relationship with it. `market-time-data` gives you the
+four steps and stays out of the fifth.
+
+**1. Register the source with its terms — before fetching anything.** Terms are not optional
+metadata. A document whose terms nobody wrote down is a document nobody can say you were allowed
+to use.
+
+```rust
+let source = SourceRegistration::new(
+    "https://venue.example/trading-hours",
+    "personal, non-commercial use only (terms page, clause 7)",
+)?;
+```
+
+**2. Fetch it.** This crate vendors no HTTP client on purpose: whose credentials, whose proxy,
+whose rate limit, and whose agreement with the venue are your questions, and a client compiled in
+here would answer them badly by default. `FileFetcher` covers the common case where you already
+have the document; anything else is a few lines around whatever client you already trust,
+implementing `SourceFetcher`.
+
+```rust
+let fetched = FileFetcher::new("./downloads").fetch(&source, now)?;
+// fetched.digest() is sha256:… of exactly what came back
+```
+
+**3. Turn the publication into rules,** in civil time-of-day for the venue's zone. This is the
+part only you can do: it is reading the venue's own words. Nothing in this repository parses a
+real venue's page.
+
+**4. Assemble a revision.** Evidence is transcribed from the retrieval rather than typed, so the
+source URL, the fetch time, the terms, and the content digest all travel with the rule.
+
+```rust
+let assembly = RevisionAssembly::new("venue-2026-01", now).superseding("venue-2025-12");
+let venue = assembly.venue(
+    "XVEN", "America/New_York", (coverage_start, coverage_end),
+    vec![evidence_from(&fetched, "2026-01-01")], rules, events,
+);
+assembly.with_venue(venue).write(Path::new("/your/data/venue-2026-01.json"))?;
+```
+
+`write` validates through the loader first and writes nothing if the revision would be rejected —
+a dataset the engine refuses to read is worse than no dataset, because it looks like data.
+
+**5. Point the tool at it.**
+
+```bash
+market-time board --dataset /your/data/venue-2026-01.json
+```
+
+Corrections produce a new revision that supersedes the old one, never an edit in place. See
+[`DATA-LICENSING.md`](DATA-LICENSING.md) — this repository is a client, not a redistributor, and
+so, when you run it, are you.
 
 The board that slice ships is a timeline: one row per venue, that venue's phases laid out across
 the day on a shared axis, a marker on the instant you are looking at. That is the shape global

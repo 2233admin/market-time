@@ -74,6 +74,11 @@ pub struct EvidenceRecord {
     /// The terms the source was obtained under, recorded at registration.
     #[serde(default)]
     pub terms: Option<String>,
+    /// Digest of the retrieved bytes, `sha256:<hex>`, where the document was fetched
+    /// rather than transcribed. Two retrievals of the same document either agree or they
+    /// do not; this is what makes that checkable after the fact.
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 /// One schedule rule.
