@@ -68,12 +68,12 @@ work around a principle; amend it or comply.
 
 ## Workflow
 
-Work flows through [OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.6.0. Spec material is
+Work flows through [OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.7.0. Spec material is
 committed under `openspec/`; the agent skills and slash commands that drive it are generated,
 not committed. Run once per clone:
 
 ```
-npx @fission-ai/openspec@1.6.0 init --tools claude,codex
+npx @fission-ai/openspec@1.7.0 init --tools claude,codex
 ```
 
 Then:
@@ -81,6 +81,9 @@ Then:
 ```
 /opsx:propose → /opsx:apply → /opsx:archive
 ```
+
+`/opsx:explore` reads the current state, `/opsx:update` revises a change in flight, and
+`/opsx:sync` reconciles specs with what was actually built.
 
 Layout:
 
