@@ -21,7 +21,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
-use hifitime::leap_seconds::{LatestLeapSeconds, LeapSecondProvider};
+use hifitime::leap_seconds::LatestLeapSeconds;
 use hifitime::{Epoch, TimeScale, Unit};
 use market_time_core::UtcInstant;
 use std::fmt;
@@ -265,7 +265,6 @@ pub fn offset_from_utc(scale: Scale, at: UtcInstant) -> ScaleOffset {
 #[must_use]
 pub fn table_last_entry_tai_seconds() -> f64 {
     LatestLeapSeconds::default()
-        .into_iter()
         .map(|leap_second| leap_second.timestamp_tai_s)
         .fold(f64::NEG_INFINITY, f64::max)
 }
