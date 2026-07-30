@@ -8,12 +8,13 @@
 //! Domain and Data Constraints. Wide-area internet time synchronisation does not reach
 //! nanoseconds, and no surface here may imply that it does.
 
-use market_time_board::{BoardView, ClockDiscipline, NowMarker};
+use market_time_board::{BoardView, ClockDiscipline, NowMarker, SegmentDetail};
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
 use market_time_core::{Interval, UtcInstant};
-use market_time_core::{PhaseOutcome, Ruleset, resolve_phase, resolve_timeline};
+use market_time_core::{Phase, PhaseOutcome, Ruleset, resolve_phase, resolve_timeline};
 use market_time_data::load_ruleset;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,9 +23,10 @@ const USAGE: &str = "\
 market-time — what phase is a venue in, and how well is that known?
 
 USAGE
-  market-time phase    --dataset <path> [--venue <id>] [--at <rfc3339|now>]
+  market-time phase    --dataset <path> [--venue <id>] [--at <rfc3339|now>] [--format text|json]
+  market-time evidence --dataset <path>  --venue <id> [--at <rfc3339|now>] [--format text|json]
   market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>]
-  market-time timeline --dataset <path>  --venue <id> [--at <rfc3339|now>] [--hours <n>]
+  market-time timeline --dataset <path>  --venue <id> [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time venues   --dataset <path>
 
 NOTES
@@ -34,6 +36,9 @@ NOTES
 
   --at defaults to now. This shell reads the clock; the core never does, and the answer
   always carries how well that instant is known.
+
+  --format json is the shape for machines. Uncertainty and unknown are fields there, not
+  prose: an unknown answer has \"phase\": null and a stated reason, never \"closed\".
 ";
 
 fn main() -> ExitCode {
@@ -69,6 +74,7 @@ fn run(args: &[String]) -> Result<String, String> {
 
     match command {
         "phase" => phase_command(&ruleset, &options, now),
+        "evidence" => evidence_command(&ruleset, &options, now),
         "board" => board_command(&ruleset, &options, now),
         "timeline" => timeline_command(&ruleset, &options, now),
         "venues" => Ok(ruleset
@@ -83,8 +89,20 @@ fn run(args: &[String]) -> Result<String, String> {
 
 fn phase_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result<String, String> {
     let venues = options.venues(ruleset)?;
-    let mut out = String::new();
 
+    if options.format == Format::Json {
+        let answers: Vec<Value> = venues
+            .iter()
+            .map(|venue| outcome_json(venue, &resolve_phase(now.instant, venue, ruleset)))
+            .collect();
+        return Ok(pretty(&json!({
+            "at": show(now.instant),
+            "clock": now.discipline.describe(),
+            "venues": answers,
+        })));
+    }
+
+    let mut out = String::new();
     for venue in venues {
         let outcome = resolve_phase(now.instant, &venue, ruleset);
         out.push_str(&render_outcome(&venue, &outcome));
@@ -93,6 +111,158 @@ fn phase_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result
 
     out.push_str(&format!("as of {}\n", now.discipline.describe()));
     Ok(out)
+}
+
+/// What the answer at `--at` rests on: the documents, the dates, and the reasoning.
+///
+/// This and a graphical board call the same [`market_time_board::inspect`], so a segment
+/// someone clicks and a segment someone asks about here cannot drift apart.
+fn evidence_command(
+    ruleset: &Ruleset,
+    options: &Options,
+    now: NowMarker,
+) -> Result<String, String> {
+    let venue = options.required_venue("evidence")?;
+    let interval = options.window(now.instant)?;
+    let timeline = resolve_timeline(interval, &venue, ruleset);
+
+    let detail = market_time_board::inspect(&timeline, now.instant)
+        .ok_or_else(|| format!("no segment covers {} for {venue}", show(now.instant)))?;
+
+    if options.format == Format::Json {
+        return Ok(pretty(&detail_json(&detail)));
+    }
+
+    let mut out = format!("{venue} at {}\n", show(now.instant));
+    match detail.phase {
+        Some(phase) => {
+            out.push_str(&format!("  phase    {phase}\n"));
+            out.push_str(&format!(
+                "  from     {} .. {}\n",
+                show(detail.interval.start),
+                show(detail.interval.end)
+            ));
+            if let Some(uncertainty) = &detail.start_uncertainty {
+                out.push_str(&format!("  start    {uncertainty}\n"));
+            }
+            if let Some(uncertainty) = &detail.end_uncertainty {
+                out.push_str(&format!("  end      {uncertainty}\n"));
+            }
+        }
+        None => {
+            out.push_str("  phase    not known\n");
+            if let Some(reason) = &detail.not_known_because {
+                out.push_str(&format!("  reason   {reason}\n"));
+            }
+            out.push_str("  note     an unknown is not a closed market\n");
+        }
+    }
+
+    if let Some(reasoning) = &detail.derived_reasoning {
+        out.push_str(&format!("  derived  {reasoning}\n"));
+    }
+    for source in &detail.sources {
+        out.push_str(&format!(
+            "  source   {} (fetched {}, effective from {})\n",
+            source.url, source.fetched_at, source.effective_from
+        ));
+        if let Some(changed) = &source.publisher_last_changed {
+            out.push_str(&format!("           publisher last changed {changed}\n"));
+        }
+    }
+    for revision in &detail.dataset_revisions {
+        out.push_str(&format!("  revision {revision}\n"));
+    }
+    out.push_str(&format!("  as of    {}\n", now.discipline.describe()));
+    Ok(out)
+}
+
+fn detail_json(detail: &SegmentDetail) -> Value {
+    json!({
+        "venue": detail.venue.to_string(),
+        "interval": {
+            "start": show(detail.interval.start),
+            "end": show(detail.interval.end),
+        },
+        "phase": detail.phase.map(Phase::as_str),
+        "not_known_because": detail.not_known_because,
+        "start_uncertainty": detail.start_uncertainty,
+        "end_uncertainty": detail.end_uncertainty,
+        "derived_reasoning": detail.derived_reasoning,
+        "sources": detail
+            .sources
+            .iter()
+            .map(|source| json!({
+                "url": source.url,
+                "fetched_at": source.fetched_at,
+                "effective_from": source.effective_from,
+                "publisher_last_changed": source.publisher_last_changed,
+            }))
+            .collect::<Vec<Value>>(),
+        "dataset_revisions": detail.dataset_revisions,
+    })
+}
+
+/// The machine shape of one venue's outcome.
+///
+/// `phase` is `null` for an unknown rather than absent or `"closed"`: a consumer reading
+/// only that field still cannot mistake a coverage gap for a closed market.
+fn outcome_json(venue: &VenueId, outcome: &PhaseOutcome) -> Value {
+    match outcome {
+        PhaseOutcome::Known(answer) => json!({
+            "venue": venue.to_string(),
+            "known": true,
+            "phase": answer.phase.as_str(),
+            "boundary_start": {
+                "instant": show(answer.boundary_start.instant),
+                "uncertainty": answer.boundary_start.uncertainty.to_string(),
+            },
+            "boundary_end": {
+                "instant": show(answer.boundary_end.instant),
+                "uncertainty": answer.boundary_end.uncertainty.to_string(),
+            },
+            "uncertainty": answer.uncertainty.to_string(),
+            "derived_reasoning": answer.derived_reasoning,
+            "events": answer
+                .events
+                .iter()
+                .map(|event| json!({
+                    "kind": event.kind.as_str(),
+                    "instant": show(event.instant),
+                    "uncertainty": event.uncertainty.to_string(),
+                }))
+                .collect::<Vec<Value>>(),
+            "sources": answer
+                .evidence
+                .iter()
+                .map(|evidence| json!({
+                    "url": evidence.source_url(),
+                    "fetched_at": show(evidence.fetched_at()),
+                    "effective_from": evidence.effective_from(),
+                }))
+                .collect::<Vec<Value>>(),
+            "dataset_revisions": answer
+                .dataset_revisions
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<String>>(),
+        }),
+        PhaseOutcome::Unknown(gap) => json!({
+            "venue": venue.to_string(),
+            "known": false,
+            "phase": Value::Null,
+            "not_known_because": gap.describe(),
+            "dataset_revisions": gap
+                .dataset_revisions
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<String>>(),
+        }),
+    }
+}
+
+fn pretty(value: &Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
 /// Renders an instant for people: RFC 3339 in UTC.
@@ -172,14 +342,38 @@ fn timeline_command(
     options: &Options,
     now: NowMarker,
 ) -> Result<String, String> {
-    let venue = options
-        .venue
-        .as_deref()
-        .ok_or_else(|| "--venue <id> is required for a timeline".to_owned())
-        .and_then(|value| VenueId::new(value).map_err(|error| error.to_string()))?;
-
+    let venue = options.required_venue("a timeline")?;
     let interval = options.window(now.instant)?;
     let timeline = resolve_timeline(interval, &venue, ruleset);
+
+    if options.format == Format::Json {
+        let segments: Vec<Value> = timeline
+            .segments
+            .iter()
+            .map(|segment| match segment {
+                TimelineSegment::Phase { interval, answer } => json!({
+                    "start": show(interval.start),
+                    "end": show(interval.end),
+                    "known": true,
+                    "phase": answer.phase.as_str(),
+                }),
+                TimelineSegment::Unknown { interval, gap } => json!({
+                    "start": show(interval.start),
+                    "end": show(interval.end),
+                    "known": false,
+                    "phase": Value::Null,
+                    "not_known_because": gap.describe(),
+                }),
+            })
+            .collect();
+
+        return Ok(pretty(&json!({
+            "venue": venue.to_string(),
+            "interval": {"start": show(interval.start), "end": show(interval.end)},
+            "tiles_interval": timeline.tiles_interval(),
+            "segments": segments,
+        })));
+    }
 
     let mut out = format!("{venue}\n");
     for segment in &timeline.segments {
@@ -205,6 +399,15 @@ fn timeline_command(
     Ok(out)
 }
 
+/// How an answer is written down. Presentation only; the answer is the same either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    /// For people.
+    Text,
+    /// For machines. Uncertainty and unknown are fields, never prose.
+    Json,
+}
+
 struct Options {
     dataset: Option<PathBuf>,
     venue: Option<String>,
@@ -212,6 +415,7 @@ struct Options {
     zone: String,
     hours: i64,
     columns: usize,
+    format: Format,
 }
 
 impl Options {
@@ -223,6 +427,7 @@ impl Options {
             zone: "UTC".to_owned(),
             hours: 24,
             columns: 72,
+            format: Format::Text,
         };
 
         let mut index = 0;
@@ -243,6 +448,15 @@ impl Options {
                         .parse()
                         .map_err(|_| "--hours needs a whole number".to_owned())?;
                 }
+                "--format" => {
+                    options.format = match value()?.as_str() {
+                        "text" => Format::Text,
+                        "json" => Format::Json,
+                        other => {
+                            return Err(format!("--format {other:?} is not text or json"));
+                        }
+                    };
+                }
                 "--columns" => {
                     options.columns = value()?
                         .parse()
@@ -261,6 +475,18 @@ impl Options {
     /// # Errors
     ///
     /// Returns the identifier error when `--venue` was blank.
+    /// The venue a single-venue command was asked about.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `--venue` is absent or blank.
+    fn required_venue(&self, command: &str) -> Result<VenueId, String> {
+        self.venue
+            .as_deref()
+            .ok_or_else(|| format!("--venue <id> is required for {command}"))
+            .and_then(|value| VenueId::new(value).map_err(|error| error.to_string()))
+    }
+
     fn venues(&self, ruleset: &Ruleset) -> Result<Vec<VenueId>, String> {
         match &self.venue {
             Some(venue) => VenueId::new(venue)

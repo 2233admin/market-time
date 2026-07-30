@@ -17,3 +17,4 @@ market-time-core = { path = "../market-time-core" }
 market-time-data = { path = "../market-time-data" }
 market-time-board = { path = "../market-time-board" }
 jiff.workspace = true
+serde_json.workspace = true

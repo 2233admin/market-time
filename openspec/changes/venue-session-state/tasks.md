@@ -31,8 +31,14 @@ with an explicit re-export surface, identifier validation that rejects a blank i
 enters, and CLI integration tests that check the shell does not lose the answer on the way
 out. 68 tests now.
 
-Still open beyond that: `evidence` as its own CLI command (5.9), evidence reachable from a
-rendered board segment (6.17), and the polish group.
+`evidence` (5.9) and evidence reachable from a rendered segment (6.17) are done, and they
+share one implementation: `market_time_board::inspect` returns what a segment rests on, the
+board prints a sources block under the rows, and the CLI command is a rendering of the same
+answer — so a segment clicked on a future graphical surface and a segment asked about on the
+command line cannot drift apart. `--format json` is available on `phase`, `evidence`, and
+`timeline`; an unknown is `"phase": null` with a stated reason, never `"closed"` (5.10).
+
+Still open: the polish group, and everything gated on real venue data.
 
 ## 1. Setup (Shared Infrastructure) (spec-kit Phase 1)
 
@@ -156,7 +162,7 @@ to a source a person can open and check.
 - [x] 5.6 [US2] Attach evidence to every `PhaseAnswer` in `crates/market-time-core/src/query.rs` (FR-009) (T048)
 - [x] 5.7 [US2] Attach the producing dataset revisions to every answer in `crates/market-time-core/src/query.rs` (FR-016) (T049)
 - [x] 5.8 [US2] Populate uncertainty from source publication precision during rule construction in `crates/market-time-core/src/rule.rs` (FR-011) (T050)
-- [ ] 5.9 [US2] Implement the CLI `evidence` command in `crates/market-time-cli/src/main.rs` per contracts/cli.md, with machine-readable output (T051)
+- [x] 5.9 [US2] Implement the CLI `evidence` command in `crates/market-time-cli/src/main.rs` per contracts/cli.md, with machine-readable output (T051)
 - [x] 5.10 [US2] Ensure uncertainty and unknown survive CLI serialization in `crates/market-time-cli/src/output.rs` — they MUST NOT be dropped for tidiness (contracts/cli.md) (T052)
 
 **Checkpoint**: US1 and US2 both work independently.
@@ -200,7 +206,7 @@ trading-hours boards establish that shape; the evidence and uncertainty layer is
 - [x] 6.14 [US3] Render the axis and venue rows in `crates/market-time-board/src/timeline.rs` — segment position and width come from the core's answer; the board holds no schedule of its own
 - [x] 6.15 [US3] Render the viewer-zone selector in `crates/market-time-board/src/axis.rs` as pure relabelling: request and answer stay UTC
 - [x] 6.16 [US3] Render out-of-coverage stretches in `crates/market-time-board/src/timeline.rs` as unknown, distinct from closed at a glance, and render process-start boundaries with their spread rather than as a hard edge (depends on 6.8 / T060)
-- [ ] 6.17 [US3] Make evidence reachable from any segment in `crates/market-time-board/src/evidence_view.rs`: source document, retrieval date, effective date, and published-or-derived, per SC-008
+- [x] 6.17 [US3] Make evidence reachable from any segment in `crates/market-time-board/src/evidence_view.rs`: source document, retrieval date, effective date, and published-or-derived, per SC-008
 
 **Checkpoint**: all three user stories independently functional.
 

@@ -185,3 +185,73 @@ fn a_phase_answer_and_the_board_agree() {
         "the status the board shows is the phase the core returned: {row}"
     );
 }
+
+#[test]
+fn a_segment_can_be_inspected_for_what_it_rests_on() {
+    let ruleset = ruleset();
+    let interval = Interval::new(
+        instant("2026-11-27T00:00:00Z"),
+        instant("2026-11-28T00:00:00Z"),
+    )
+    .expect("valid interval");
+    let timeline = resolve_timeline(interval, &VenueId::new("SYNTH-DST").expect("id"), &ruleset);
+
+    let detail = market_time_board::inspect(&timeline, instant("2026-11-27T19:00:00Z"))
+        .expect("the row covers that instant");
+
+    assert_eq!(detail.phase, Some(Phase::PostClose));
+    assert!(
+        detail.sources.iter().any(|s| s.url.contains("half-days")),
+        "the segment reaches the document behind it: {detail:?}"
+    );
+    assert!(
+        detail.derived_reasoning.is_some(),
+        "a derived rule says so at the point of inspection, not only in the core"
+    );
+    assert!(detail.start_uncertainty.is_some());
+    assert!(!detail.dataset_revisions.is_empty());
+}
+
+#[test]
+fn inspecting_an_unknown_stretch_says_why_and_offers_no_phase() {
+    let ruleset = ruleset();
+    let interval = Interval::new(
+        instant("2027-02-01T00:00:00Z"),
+        instant("2027-02-02T00:00:00Z"),
+    )
+    .expect("valid interval");
+    let timeline = resolve_timeline(interval, &VenueId::new("SYNTH-DST").expect("id"), &ruleset);
+
+    let detail = market_time_board::inspect(&timeline, instant("2027-02-01T12:00:00Z"))
+        .expect("the row covers that instant as an unknown");
+
+    assert_eq!(detail.phase, None, "an unknown offers no phase to misread");
+    assert!(
+        detail
+            .not_known_because
+            .as_deref()
+            .is_some_and(|reason| reason.contains("coverage")),
+        "{detail:?}"
+    );
+    assert!(
+        detail.sources.is_empty(),
+        "there is no document to cite for a gap"
+    );
+}
+
+#[test]
+fn the_board_prints_the_documents_its_rows_rest_on() {
+    let board = view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T02:00:00Z"),
+    );
+    let rendered = render(&board);
+
+    assert!(rendered.contains("sources for SYNTH-AUCT:"), "{rendered}");
+    assert!(
+        rendered.contains("https://synthetic.test/auct/trading-rules"),
+        "a viewer reaches the source without leaving the board: {rendered}"
+    );
+}

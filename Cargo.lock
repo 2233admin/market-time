@@ -229,6 +229,7 @@ dependencies = [
  "market-time-board",
  "market-time-core",
  "market-time-data",
+ "serde_json",
 ]
 
 [[package]]

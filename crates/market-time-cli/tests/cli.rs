@@ -212,3 +212,133 @@ fn help_is_available_without_a_dataset() {
     assert!(output.status.success());
     assert!(stdout(&output).contains("USAGE"));
 }
+
+#[test]
+fn evidence_reaches_the_document_and_says_when_a_rule_was_derived() {
+    let output = run(&[
+        "evidence",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-DST",
+        "--at",
+        "2026-11-27T19:00:00Z",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(text.contains("phase    post_close"), "{text}");
+    assert!(
+        text.contains("https://synthetic.test/dst/half-days"),
+        "{text}"
+    );
+    assert!(
+        text.contains("derived  the notice gives the close"),
+        "derived is never presented as observed: {text}"
+    );
+    assert!(text.contains("revision synthetic-2026-07-30"), "{text}");
+}
+
+#[test]
+fn evidence_for_an_unknown_stretch_offers_no_phase() {
+    let output = run(&[
+        "evidence",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-AUCT",
+        "--at",
+        "2030-01-01T00:00:00Z",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("json output parses");
+    assert!(value["phase"].is_null(), "{value}");
+    assert!(
+        value["not_known_because"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("coverage")),
+        "{value}"
+    );
+    assert_eq!(value["sources"].as_array().map(Vec::len), Some(0));
+}
+
+#[test]
+fn json_keeps_unknown_and_uncertainty_as_fields() {
+    let output = run(&[
+        "phase",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--format",
+        "json",
+    ]);
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("json output parses");
+
+    let venues = value["venues"].as_array().expect("a list of venues");
+    assert_eq!(venues.len(), 3, "{value}");
+
+    let dst = venues
+        .iter()
+        .find(|entry| entry["venue"] == "SYNTH-DST")
+        .expect("SYNTH-DST is in the dataset");
+    assert!(dst["uncertainty"].is_string(), "{dst}");
+    assert!(
+        dst["sources"].as_array().is_some_and(|s| !s.is_empty()),
+        "{dst}"
+    );
+
+    let always = venues
+        .iter()
+        .find(|entry| entry["venue"] == "SYNTH-ALWAYS")
+        .expect("SYNTH-ALWAYS is in the dataset");
+    assert_eq!(always["phase"], "continuous_trading", "{always}");
+}
+
+#[test]
+fn a_timeline_can_be_read_by_a_machine() {
+    let output = run(&[
+        "timeline",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-DST",
+        "--at",
+        "2026-12-30T12:00:00Z",
+        "--hours",
+        "48",
+        "--format",
+        "json",
+    ]);
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("json output parses");
+
+    assert_eq!(value["tiles_interval"], true, "{value}");
+    let segments = value["segments"].as_array().expect("segments");
+    assert!(
+        segments.iter().any(|segment| segment["known"] == false),
+        "the stretch past coverage is a segment with known=false, not a hole: {value}"
+    );
+    assert!(
+        segments
+            .iter()
+            .all(|segment| segment["phase"].is_string() || segment["phase"].is_null()),
+        "{value}"
+    );
+}
+
+#[test]
+fn an_unusable_format_is_refused() {
+    let output = run(&["phase", "--dataset", &fixture(), "--format", "yaml"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("not text or json"),
+        "{}",
+        stderr(&output)
+    );
+}

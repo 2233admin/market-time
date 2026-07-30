@@ -25,7 +25,7 @@
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use market_time_core::Phase;
-use market_time_core::{Interval, UtcInstant};
+use market_time_core::{EvidenceRef, Interval, UtcInstant, VenueId};
 use market_time_core::{Timeline, TimelineSegment};
 use std::fmt::Write as _;
 
@@ -149,6 +149,156 @@ pub fn render(view: &BoardView) -> String {
         );
     }
     let _ = writeln!(out, "  key:  {}", legend());
+
+    let sources = render_sources(&view.rows);
+    if !sources.is_empty() {
+        let _ = writeln!(out);
+        out.push_str(&sources);
+    }
+
+    out
+}
+
+/// What one segment of a rendered row rests on.
+///
+/// This is the "inspect a segment" answer: a viewer pointing at a stretch of a row gets
+/// the phase, the boundaries with their uncertainty, whether the governing rule was
+/// published or derived, the documents behind it, and the revisions that produced it —
+/// without leaving the product to look any of it up (SC-008).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentDetail {
+    /// The venue whose row was inspected.
+    pub venue: VenueId,
+    /// The stretch the segment occupies.
+    pub interval: Interval,
+    /// The phase, or `None` when the stretch is outside declared coverage.
+    pub phase: Option<Phase>,
+    /// Why the stretch is not known, when it is not.
+    pub not_known_because: Option<String>,
+    /// How the start boundary is known.
+    pub start_uncertainty: Option<String>,
+    /// How the end boundary is known.
+    pub end_uncertainty: Option<String>,
+    /// Present when the governing rule is a reading rather than the venue's wording.
+    pub derived_reasoning: Option<String>,
+    /// The documents behind the segment.
+    pub sources: Vec<SourceRef>,
+    /// The revisions that produced it.
+    pub dataset_revisions: Vec<String>,
+}
+
+/// One document behind a segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceRef {
+    /// The document a person can open.
+    pub url: String,
+    /// When it was retrieved.
+    pub fetched_at: String,
+    /// The date the rule takes effect.
+    pub effective_from: String,
+    /// When the publisher last changed it, where the publisher says.
+    pub publisher_last_changed: Option<String>,
+}
+
+/// What the segment covering `at` rests on, or `None` when the row does not cover `at`.
+///
+/// A board is a rendering; this is the door out of it. A graphical surface calls this on
+/// click, the CLI calls it for `evidence`, and both get the same answer because neither
+/// assembles it itself.
+#[must_use]
+pub fn inspect(timeline: &Timeline, at: UtcInstant) -> Option<SegmentDetail> {
+    let segment = segment_at(timeline, at)?;
+    Some(match segment {
+        TimelineSegment::Phase { interval, answer } => SegmentDetail {
+            venue: timeline.venue.clone(),
+            interval: *interval,
+            phase: Some(answer.phase),
+            not_known_because: None,
+            start_uncertainty: Some(answer.boundary_start.uncertainty.to_string()),
+            end_uncertainty: Some(answer.boundary_end.uncertainty.to_string()),
+            derived_reasoning: answer.derived_reasoning.clone(),
+            sources: answer.evidence.iter().map(source_ref).collect(),
+            dataset_revisions: answer
+                .dataset_revisions
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        },
+        TimelineSegment::Unknown { interval, gap } => SegmentDetail {
+            venue: timeline.venue.clone(),
+            interval: *interval,
+            phase: None,
+            not_known_because: Some(gap.describe()),
+            start_uncertainty: None,
+            end_uncertainty: None,
+            derived_reasoning: None,
+            sources: Vec::new(),
+            dataset_revisions: gap
+                .dataset_revisions
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        },
+    })
+}
+
+fn source_ref(evidence: &EvidenceRef) -> SourceRef {
+    SourceRef {
+        url: evidence.source_url().to_owned(),
+        fetched_at: evidence.fetched_at().to_string(),
+        effective_from: evidence.effective_from().to_owned(),
+        publisher_last_changed: evidence.publisher_last_changed().map(ToOwned::to_owned),
+    }
+}
+
+/// The sources block printed under the board.
+///
+/// A board that shows a phase and hides where it came from is the thing this product
+/// exists not to be. Every venue drawn above lists the documents its drawn segments rest
+/// on, deduplicated, with derived rules marked as derived.
+fn render_sources(rows: &[Timeline]) -> String {
+    let mut out = String::new();
+
+    for row in rows {
+        let mut seen: Vec<String> = Vec::new();
+        let mut lines: Vec<String> = Vec::new();
+        let mut derived: Vec<String> = Vec::new();
+
+        for segment in &row.segments {
+            let TimelineSegment::Phase { answer, .. } = segment else {
+                continue;
+            };
+            for evidence in &answer.evidence {
+                if seen.iter().any(|url| url == evidence.source_url()) {
+                    continue;
+                }
+                seen.push(evidence.source_url().to_owned());
+                lines.push(format!(
+                    "    {} (fetched {}, effective from {})",
+                    evidence.source_url(),
+                    evidence.fetched_at(),
+                    evidence.effective_from()
+                ));
+            }
+            if let Some(reasoning) = &answer.derived_reasoning
+                && !derived.iter().any(|note| note == reasoning)
+            {
+                derived.push(reasoning.clone());
+            }
+        }
+
+        if lines.is_empty() && derived.is_empty() {
+            continue;
+        }
+
+        let _ = writeln!(out, "  sources for {}:", row.venue);
+        for line in lines {
+            let _ = writeln!(out, "{line}");
+        }
+        for note in derived {
+            let _ = writeln!(out, "    derived: {note}");
+        }
+    }
 
     out
 }
