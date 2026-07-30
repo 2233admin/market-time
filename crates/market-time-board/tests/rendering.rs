@@ -255,3 +255,91 @@ fn the_board_prints_the_documents_its_rows_rest_on() {
         "a viewer reaches the source without leaving the board: {rendered}"
     );
 }
+
+#[test]
+fn the_svg_board_marks_unknown_with_a_pattern_not_a_paler_shade() {
+    let board = view("UTC", "2027-02-01T00:00:00Z", "2027-02-02T00:00:00Z", None);
+    let svg = market_time_board::render_svg(&board);
+
+    assert!(svg.starts_with("<svg"), "a self-contained document");
+    assert!(svg.ends_with("</svg>"));
+    assert!(
+        svg.contains(r#"<pattern id="not-known""#),
+        "the hatch is defined"
+    );
+    assert!(
+        svg.contains("url(#not-known)"),
+        "and used for the out-of-coverage stretch"
+    );
+    assert!(
+        svg.contains("an unknown is not a closed market"),
+        "and said in words, because colour is never the only channel"
+    );
+}
+
+#[test]
+fn the_svg_board_softens_a_process_start_boundary() {
+    let board = view(
+        "UTC",
+        "2026-07-15T00:00:00Z",
+        "2026-07-16T00:00:00Z",
+        Some("2026-07-15T14:00:00Z"),
+    );
+    let svg = market_time_board::render_svg(&board);
+
+    assert!(
+        svg.contains("url(#process-start)"),
+        "SYNTH-DST's open is a process, and the edge says so"
+    );
+    assert!(
+        svg.contains("spread not published"),
+        "the hover text carries the uncertainty verbatim"
+    );
+}
+
+#[test]
+fn the_svg_board_carries_the_clock_note_and_the_sources() {
+    let board = view(
+        "Asia/Shanghai",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T02:00:00Z"),
+    );
+    let svg = market_time_board::render_svg(&board);
+
+    assert!(svg.contains("not read from a clock"), "the clock note");
+    assert!(svg.contains("axis in Asia/Shanghai"), "the axis zone");
+    assert!(
+        svg.contains("https://synthetic.test/auct/trading-rules"),
+        "the documents the rows rest on"
+    );
+    assert!(svg.contains("continuous trading"), "the status in words");
+}
+
+#[test]
+fn svg_text_from_data_cannot_close_a_tag() {
+    let ruleset = ruleset();
+    let interval = Interval::new(
+        instant("2026-07-30T00:00:00Z"),
+        instant("2026-07-31T00:00:00Z"),
+    )
+    .expect("valid interval");
+
+    // A venue id nobody should ever use, which is exactly why the renderer must survive it.
+    let hostile = VenueId::new("</text><script>x</script>").expect("non-empty id");
+    let timeline = resolve_timeline(interval, &hostile, &ruleset);
+
+    let svg = market_time_board::render_svg(&BoardView {
+        interval,
+        rows: vec![timeline],
+        now: None,
+        axis_zone: "UTC".to_owned(),
+        columns: 24,
+    });
+
+    assert!(!svg.contains("<script>"), "the tag never lands as markup");
+    assert!(
+        svg.contains("&lt;/text&gt;&lt;script&gt;"),
+        "it lands as text"
+    );
+}

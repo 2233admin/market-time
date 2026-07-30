@@ -337,7 +337,7 @@ fn an_unusable_format_is_refused() {
     let output = run(&["phase", "--dataset", &fixture(), "--format", "yaml"]);
     assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("not text or json"),
+        stderr(&output).contains("is not text, json, or svg"),
         "{}",
         stderr(&output)
     );
@@ -407,5 +407,34 @@ fn a_wall_clock_time_that_never_happens_is_refused() {
     assert!(
         message.contains("No instant bears that reading"),
         "{message}"
+    );
+}
+
+#[test]
+fn the_board_can_be_written_as_svg() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--zone",
+        "Asia/Shanghai",
+        "--format",
+        "svg",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let svg = stdout(&output);
+    assert!(
+        svg.trim_start().starts_with("<svg"),
+        "{}",
+        &svg[..60.min(svg.len())]
+    );
+    assert!(svg.contains("</svg>"));
+    assert!(svg.contains("SYNTH-AUCT"), "a row per venue");
+    assert!(
+        svg.contains("an unknown is not a closed market"),
+        "the honesty note travels with the picture"
     );
 }

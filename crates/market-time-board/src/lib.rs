@@ -22,6 +22,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
+pub mod svg;
+
+pub use svg::{SvgOptions, render_svg, render_svg_with};
+
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use market_time_core::Phase;

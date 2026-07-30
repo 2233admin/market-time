@@ -48,3 +48,4 @@ desktop.ini
 # fetched at build or run time rather than vendored, and any local cache of
 # that fetched data must stay untracked.
 /data/cache/
+.gstack/

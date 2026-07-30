@@ -65,6 +65,17 @@ SYNTH-DST     [|.................-----------------###################___________
   key:  # trading  = auction  - pre-open  : break  _ post-close  . closed  ! halt  ? not known
 ```
 
+For a picture rather than a terminal, `--format svg` writes a self-contained SVG:
+
+```bash
+market-time board --dataset <path> --zone Asia/Shanghai --format svg > board.svg
+```
+
+Same rules apply to the picture. Colour is never the only channel: every row carries its
+status in words, an out-of-coverage stretch is hatched rather than merely paler, a boundary
+the venue publishes as the start of a process gets a soft edge instead of a hairline, and the
+documents behind the rows are printed underneath.
+
 `market-time phase` answers one venue with its evidence, its dataset revisions, and the
 uncertainty on each boundary. `market-time timeline` prints the segments a board row is drawn
 from, including the stretches that fall outside coverage — those come back as "not known", never

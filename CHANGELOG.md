@@ -41,7 +41,10 @@ ships here, now or ever.
 - **`market-time-board`** — the timeline board. One row per venue, phases across a shared
   axis, a marker on the instant being viewed, the viewer's zone as axis labelling only.
   Unknown renders distinctly from closed. `inspect` returns what a segment rests on, and the
-  board prints a sources block beneath its rows.
+  board prints a sources block beneath its rows. `render_svg` draws the same board as a
+  self-contained SVG — the shape a global trading-hours board is recognised in — keeping
+  every honesty rule the text renderer has: status in words, hatching for not-known, a soft
+  edge on a process-start boundary, and the sources underneath.
 - **The operator path** — `SourceRegistration` (which cannot be built without the terms the
   source may be used under), the `SourceFetcher` trait with a `FileFetcher` implementation,
   and `RevisionAssembly`, which transcribes evidence from the retrieval — URL, fetch time,

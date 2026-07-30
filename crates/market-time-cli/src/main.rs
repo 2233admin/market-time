@@ -28,7 +28,7 @@ market-time — what phase is a venue in, and how well is that known?
 USAGE
   market-time phase    --dataset <path> [--venue <id>] [--at <rfc3339|now>] [--format text|json]
   market-time evidence --dataset <path>  --venue <id> [--at <rfc3339|now>] [--format text|json]
-  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>]
+  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg]
   market-time timeline --dataset <path>  --venue <id> [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time venues   --dataset <path>
 
@@ -43,6 +43,10 @@ NOTES
   --at-zone reads --at as a wall-clock time in that zone instead of as UTC. Twice a year a
   wall-clock time names two instants or none; those are refused with both candidates rather
   than resolved by a coin flip. Name the instant you mean with a UTC --at.
+
+  --format svg on `board` writes a self-contained SVG to stdout: redirect it to a file and
+  open it. Colour is never the only channel there either — every row is labelled, and an
+  out-of-coverage stretch is hatched rather than merely paler.
 
   --format json is the shape for machines. Uncertainty and unknown are fields there, not
   prose: an unknown answer has \"phase\": null and a stated reason, never \"closed\".
@@ -341,6 +345,10 @@ fn board_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result
         columns: options.columns,
     };
 
+    if options.format == Format::Svg {
+        return Ok(market_time_board::render_svg(&view));
+    }
+
     Ok(market_time_board::render(&view))
 }
 
@@ -413,6 +421,8 @@ enum Format {
     Text,
     /// For machines. Uncertainty and unknown are fields, never prose.
     Json,
+    /// For eyes. The board as a self-contained SVG document.
+    Svg,
 }
 
 struct Options {
@@ -462,8 +472,9 @@ impl Options {
                     options.format = match value()?.as_str() {
                         "text" => Format::Text,
                         "json" => Format::Json,
+                        "svg" => Format::Svg,
                         other => {
-                            return Err(format!("--format {other:?} is not text or json"));
+                            return Err(format!("--format {other:?} is not text, json, or svg"));
                         }
                     };
                 }
