@@ -79,6 +79,14 @@ of Mark Time are responsible for satisfying those upstream terms themselves —
 the same way using an HTTP client does not grant rights to whatever a server
 happens to return.
 
+The checked-in `crates/market-time-data/fixtures/synthetic-venues.json` is authored test
+material, not a calendar, schedule, or factual claim about any real venue. Its three
+`SYNTH-` venues exist only to exercise the loader, the tiling invariant, the resolver, the
+timeline query, and the board — auctions with a mid-day break, a daylight-saving zone whose
+open is a process, and an always-on venue with scheduled events. It is covered by the
+repository's code license and does not create an exception to the rule that no venue data
+ships here.
+
 ## Scope of this document
 
 This is policy, not a legal opinion, and it is not a substitute for reading a
