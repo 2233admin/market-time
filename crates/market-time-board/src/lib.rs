@@ -29,7 +29,7 @@ pub use svg::{SvgOptions, render_svg, render_svg_with};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use market_time_core::Phase;
-use market_time_core::{EvidenceRef, Interval, UtcInstant, VenueId};
+use market_time_core::{AssetFamily, EvidenceRef, Interval, UtcInstant, VenueId, VenueProfile};
 use market_time_core::{Timeline, TimelineSegment};
 use std::fmt::Write as _;
 
@@ -89,13 +89,53 @@ pub struct NowMarker {
     pub discipline: ClockDiscipline,
 }
 
+/// One venue's row: what it is called, what family it belongs to, and its timeline.
+///
+/// The label and family are display data. Resolution never sees them, and a row whose
+/// dataset says nothing about presentation still renders — under the venue identifier,
+/// which is a fallback rather than an invention.
+#[derive(Debug, Clone)]
+pub struct BoardRow {
+    /// The phases this venue passes through across the queried interval.
+    pub timeline: Timeline,
+    /// The name to print.
+    pub label: String,
+    /// The city or region, printed under the name where a surface has room.
+    pub location: Option<String>,
+    /// The family this row is grouped under.
+    pub family: Option<AssetFamily>,
+}
+
+impl BoardRow {
+    /// Builds a row from a timeline and whatever the dataset says about presentation.
+    #[must_use]
+    pub fn new(timeline: Timeline, profile: Option<&VenueProfile>) -> Self {
+        let label = profile.map_or_else(
+            || timeline.venue.as_str().to_owned(),
+            |profile| profile.label(timeline.venue.as_str()).to_owned(),
+        );
+        Self {
+            label,
+            location: profile.and_then(|profile| profile.location.clone()),
+            family: profile.and_then(|profile| profile.family),
+            timeline,
+        }
+    }
+
+    /// The venue this row is about.
+    #[must_use]
+    pub fn venue(&self) -> &VenueId {
+        &self.timeline.venue
+    }
+}
+
 /// What the board renders.
 #[derive(Debug, Clone)]
 pub struct BoardView {
     /// The interval the axis spans.
     pub interval: Interval,
-    /// One timeline per venue, all over the same interval.
-    pub rows: Vec<Timeline>,
+    /// One row per venue, all over the same interval.
+    pub rows: Vec<BoardRow>,
     /// The instant being viewed, when the board is showing one.
     pub now: Option<NowMarker>,
     /// The IANA zone the axis is labelled in. Labelling only: the answers stay UTC.
@@ -116,7 +156,7 @@ pub fn render(view: &BoardView) -> String {
     let label_width = view
         .rows
         .iter()
-        .map(|row| row.venue.as_str().len())
+        .map(|row| row.label.len())
         .max()
         .unwrap_or(6)
         .max(6);
@@ -131,19 +171,30 @@ pub fn render(view: &BoardView) -> String {
         label_width = label_width
     );
 
-    for row in &view.rows {
-        let _ = writeln!(
-            out,
-            "{:label_width$}  {}  {}",
-            row.venue.as_str(),
-            render_row(row, view.interval, columns, view.now.as_ref()),
-            status(row, view.now.as_ref()),
-            label_width = label_width
-        );
+    for (family, members) in grouped(&view.rows) {
+        let heading = family.map_or("Other", AssetFamily::heading);
+        let _ = writeln!(out, "{heading}");
+        for row in members {
+            let _ = writeln!(
+                out,
+                "{:label_width$}  {}  {}",
+                row.label,
+                render_row(&row.timeline, view.interval, columns, view.now.as_ref()),
+                status(&row.timeline, view.now.as_ref()),
+                label_width = label_width
+            );
+        }
     }
 
     let _ = writeln!(out);
     let _ = writeln!(out, "  axis: {} ({columns} columns)", view.axis_zone);
+    if let Some(now) = &view.now {
+        let _ = writeln!(
+            out,
+            "  count: {}",
+            trading_count(&view.rows, now.instant).describe()
+        );
+    }
     if let Some(now) = &view.now {
         let _ = writeln!(
             out,
@@ -260,10 +311,10 @@ fn source_ref(evidence: &EvidenceRef) -> SourceRef {
 /// A board that shows a phase and hides where it came from is the thing this product
 /// exists not to be. Every venue drawn above lists the documents its drawn segments rest
 /// on, deduplicated, with derived rules marked as derived.
-fn render_sources(rows: &[Timeline]) -> String {
+fn render_sources(rows: &[BoardRow]) -> String {
     let mut out = String::new();
 
-    for row in rows {
+    for row in rows.iter().map(|row| &row.timeline) {
         let mut seen: Vec<String> = Vec::new();
         let mut lines: Vec<String> = Vec::new();
         let mut derived: Vec<String> = Vec::new();
@@ -305,6 +356,84 @@ fn render_sources(rows: &[Timeline]) -> String {
     }
 
     out
+}
+
+/// The rows, grouped for display: families in their listed order, then anything the
+/// dataset left ungrouped.
+///
+/// Grouping is presentation. It reorders rows and never changes one.
+#[must_use]
+pub fn grouped(rows: &[BoardRow]) -> Vec<(Option<AssetFamily>, Vec<&BoardRow>)> {
+    let mut groups: Vec<(Option<AssetFamily>, Vec<&BoardRow>)> = Vec::new();
+
+    for family in AssetFamily::all() {
+        let members: Vec<&BoardRow> = rows
+            .iter()
+            .filter(|row| row.family == Some(family))
+            .collect();
+        if !members.is_empty() {
+            groups.push((Some(family), members));
+        }
+    }
+
+    let ungrouped: Vec<&BoardRow> = rows.iter().filter(|row| row.family.is_none()).collect();
+    if !ungrouped.is_empty() {
+        groups.push((None, ungrouped));
+    }
+
+    groups
+}
+
+/// How many of the drawn venues are trading at `at`, and how many were asked about.
+///
+/// The second number is not decoration. "12 trading" alone hides whether the other
+/// venues are closed or simply not known, and those are different claims.
+#[must_use]
+pub fn trading_count(rows: &[BoardRow], at: UtcInstant) -> TradingCount {
+    let mut count = TradingCount::default();
+    for row in rows {
+        match segment_at(&row.timeline, at) {
+            Some(TimelineSegment::Phase { answer, .. }) => {
+                count.venues += 1;
+                if answer.phase.is_trading() {
+                    count.trading += 1;
+                } else {
+                    count.not_trading += 1;
+                }
+            }
+            Some(TimelineSegment::Unknown { .. }) => {
+                count.venues += 1;
+                count.not_known += 1;
+            }
+            None => count.venues += 1,
+        }
+    }
+    count
+}
+
+/// A count of what the board is showing at one instant.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TradingCount {
+    /// Venues drawn.
+    pub venues: usize,
+    /// Venues whose phase matches an order-matching state.
+    pub trading: usize,
+    /// Venues in a phase that is not matching — closed, on a break, in a halt.
+    pub not_trading: usize,
+    /// Venues outside their declared coverage, which is neither.
+    pub not_known: usize,
+}
+
+impl TradingCount {
+    /// A one-line summary that never reports an unknown as a closure.
+    #[must_use]
+    pub fn describe(self) -> String {
+        let mut text = format!("{} of {} venues trading", self.trading, self.venues);
+        if self.not_known > 0 {
+            let _ = write!(text, ", {} not known", self.not_known);
+        }
+        text
+    }
 }
 
 /// The glyph a phase renders as.

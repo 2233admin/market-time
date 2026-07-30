@@ -94,6 +94,9 @@ impl RevisionAssembly {
         VenueRecord {
             venue: venue.into(),
             home_zone: home_zone.into(),
+            display_name: None,
+            location: None,
+            family: None,
             coverage: CoverageRecord {
                 start: rfc3339(coverage.0),
                 end: rfc3339(coverage.1),

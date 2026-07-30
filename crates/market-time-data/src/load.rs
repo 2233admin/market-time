@@ -12,6 +12,7 @@ use jiff::civil::{Date, Time, Weekday};
 use market_time_core::CoverageRange;
 use market_time_core::Phase;
 use market_time_core::Uncertainty;
+use market_time_core::{AssetFamily, VenueProfile};
 use market_time_core::{CivilDaySchedule, DateRange, Rule, RuleKind};
 use market_time_core::{DatasetRevision, Ruleset, VenueRuleset};
 use market_time_core::{DatasetRevisionId, IanaZoneId, IdentifierError, VenueId};
@@ -83,6 +84,19 @@ fn venue_ruleset(record: &VenueRecord) -> Result<VenueRuleset, LoadError> {
     Ok(VenueRuleset {
         venue: identifier(VenueId::new(&record.venue))?,
         home_zone: identifier(IanaZoneId::new(&record.home_zone))?,
+        profile: VenueProfile {
+            display_name: record.display_name.clone(),
+            location: record.location.clone(),
+            family: record
+                .family
+                .as_deref()
+                .map(|family| {
+                    AssetFamily::from_str_exact(family).ok_or_else(|| LoadError::UnknownFamily {
+                        family: family.to_owned(),
+                    })
+                })
+                .transpose()?,
+        },
         coverage,
         rules: record
             .rules
@@ -274,6 +288,11 @@ pub enum LoadError {
         /// The name the dataset used.
         phase: String,
     },
+    /// An asset family outside the closed set.
+    UnknownFamily {
+        /// The name the dataset used.
+        family: String,
+    },
     /// An event kind outside the shared vocabulary.
     UnknownEventKind {
         /// The name the dataset used.
@@ -313,6 +332,10 @@ impl fmt::Display for LoadError {
                 f,
                 "dataset uses phase {phase:?}, which is not in the shared vocabulary; \
                  a venue may not introduce a phase name of its own"
+            ),
+            Self::UnknownFamily { family } => write!(
+                f,
+                "dataset uses asset family {family:?}, which is not one of equities,                  spot_and_fx, or futures"
             ),
             Self::UnknownEventKind { kind } => {
                 write!(

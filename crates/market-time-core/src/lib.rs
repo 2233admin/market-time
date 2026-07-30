@@ -25,6 +25,7 @@
 // name a type, never a path through this crate's internals — so moving a type between
 // modules is not a breaking change, and nothing outside can reach a helper that was
 // never meant to be part of the contract.
+mod catalog;
 mod civil;
 mod coverage;
 mod event;
@@ -40,6 +41,7 @@ mod uncertainty;
 
 pub mod tzdata;
 
+pub use catalog::{AssetFamily, VenueProfile};
 pub use civil::{CivilError, CivilInstant, CivilResolution};
 pub use coverage::{CoverageGap, CoverageRange};
 pub use event::{EventKind, EventOccurrence, EventRule};

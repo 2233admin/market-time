@@ -21,7 +21,7 @@
 //! No dependency, no font loading, no script: the output is a self-contained SVG string
 //! that opens anywhere and diffs cleanly.
 
-use crate::{BoardView, NowMarker};
+use crate::{BoardRow, BoardView, NowMarker, grouped, trading_count};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use market_time_core::{Interval, Phase, Timeline, TimelineSegment, Uncertainty, UtcInstant};
@@ -68,7 +68,7 @@ impl Default for SvgOptions {
     fn default() -> Self {
         Self {
             width: 1180,
-            row_height: 30,
+            row_height: 34,
             label_width: 200,
             status_width: 190,
             show_sources: true,
@@ -97,7 +97,10 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
     .max(120.0);
     let header = 96.0;
     let row_height = f64::from(options.row_height);
-    let all_rows = row_height * count_as_f64(view.rows.len());
+    let groups = grouped(&view.rows);
+    let heading_height = 22.0;
+    let all_rows =
+        row_height * count_as_f64(view.rows.len()) + heading_height * count_as_f64(groups.len());
     let sources = if options.show_sources {
         source_lines(&view.rows)
     } else {
@@ -130,6 +133,15 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
             fill = palette::MUTED,
             when = escape(&format_instant(&zone, now.instant)),
             clock = escape(&now.discipline.describe())
+        );
+    }
+    if let Some(now) = &view.now {
+        let _ = write!(
+            svg,
+            r#"<text x="{x:.0}" y="34" fill="{fill}" font-size="12" text-anchor="end">{count}</text>"#,
+            x = f64::from(options.width) - 24.0,
+            fill = palette::LABEL,
+            count = escape(&trading_count(&view.rows, now.instant).describe())
         );
     }
     let _ = write!(
@@ -168,80 +180,113 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
         );
     }
 
-    // Rows.
-    for (index, row) in view.rows.iter().enumerate() {
-        let bar_y = header + row_height * count_as_f64(index) + 5.0;
-        let bar_height = row_height - 12.0;
-        let text_y = bar_y + bar_height * 0.72;
-
+    // Rows, grouped the way conventional boards group them.
+    let mut cursor_y = header;
+    for (family, members) in &groups {
         let _ = write!(
             svg,
-            r#"<text x="24" y="{text_y:.1}" fill="{fill}" font-size="13">{venue}</text>"#,
-            fill = palette::LABEL,
-            venue = escape(row.venue.as_str())
+            r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11" font-weight="600" letter-spacing="0.6">{heading}</text>"#,
+            y = cursor_y + 14.0,
+            fill = palette::FAINT,
+            heading = escape(
+                &family
+                    .map_or("OTHER", |family| family.heading())
+                    .to_uppercase()
+            )
         );
-        let _ = write!(
-            svg,
-            r#"<rect x="{track_left:.1}" y="{bar_y:.1}" width="{track_span:.1}" height="{bar_height:.1}" fill="{fill}" rx="3"/>"#,
-            fill = palette::TRACK
-        );
+        cursor_y += heading_height;
 
-        for segment in &row.segments {
-            let Some((x, width)) =
-                placement(view.interval, segment.interval(), track_left, track_span)
-            else {
-                continue;
+        for row in members {
+            let bar_y = cursor_y + 5.0;
+            let bar_height = row_height - 12.0;
+            let text_y = bar_y + bar_height * 0.72;
+
+            // Name on one line, place on the next. A venue name long enough to collide
+            // with its own city is the common case, not the exception.
+            let name_y = if row.location.is_some() {
+                text_y - 6.0
+            } else {
+                text_y
             };
-
-            let (fill, hover) = match segment {
-                TimelineSegment::Phase { answer, .. } => (
-                    phase_fill(answer.phase).to_owned(),
-                    format!(
-                        "{phase} · starts {start} · ends {end}",
-                        phase = answer.phase,
-                        start = answer.boundary_start.uncertainty,
-                        end = answer.boundary_end.uncertainty
-                    ),
-                ),
-                TimelineSegment::Unknown { gap, .. } => {
-                    ("url(#not-known)".to_owned(), gap.describe())
-                }
-            };
-
             let _ = write!(
                 svg,
-                r#"<rect x="{x:.2}" y="{bar_y:.1}" width="{width:.2}" height="{bar_height:.1}" fill="{fill}" rx="2"><title>{hover}</title></rect>"#,
-                hover = escape(&hover)
+                r#"<text x="24" y="{name_y:.1}" fill="{fill}" font-size="13">{venue}</text>"#,
+                fill = palette::LABEL,
+                venue = escape(&row.label)
             );
-
-            // A boundary the venue publishes as the start of a process is not a hairline.
-            if let TimelineSegment::Phase { answer, .. } = segment
-                && matches!(
-                    answer.boundary_start.uncertainty,
-                    Uncertainty::ProcessStart { .. }
-                )
-            {
+            if let Some(location) = &row.location {
                 let _ = write!(
                     svg,
-                    r#"<rect x="{x:.2}" y="{bar_y:.1}" width="{fade:.2}" height="{bar_height:.1}" fill="url(#process-start)"/>"#,
-                    fade = width.min(16.0)
+                    r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="10">{location}</text>"#,
+                    y = name_y + 13.0,
+                    fill = palette::FAINT,
+                    location = escape(location)
                 );
             }
-        }
-
-        let status = status_text(row, view.now.as_ref());
-        if !status.is_empty() {
             let _ = write!(
                 svg,
-                r#"<text x="{x:.0}" y="{text_y:.1}" fill="{fill}" font-size="12">{status}</text>"#,
-                x = track_left + track_span + 14.0,
-                fill = if status == "not known" {
-                    palette::ATTENTION
-                } else {
-                    palette::MUTED
-                },
-                status = escape(&status)
+                r#"<rect x="{track_left:.1}" y="{bar_y:.1}" width="{track_span:.1}" height="{bar_height:.1}" fill="{fill}" rx="3"/>"#,
+                fill = palette::TRACK
             );
+
+            for segment in &row.timeline.segments {
+                let Some((x, width)) =
+                    placement(view.interval, segment.interval(), track_left, track_span)
+                else {
+                    continue;
+                };
+
+                let (fill, hover) = match segment {
+                    TimelineSegment::Phase { answer, .. } => (
+                        phase_fill(answer.phase).to_owned(),
+                        format!(
+                            "{phase} · starts {start} · ends {end}",
+                            phase = answer.phase,
+                            start = answer.boundary_start.uncertainty,
+                            end = answer.boundary_end.uncertainty
+                        ),
+                    ),
+                    TimelineSegment::Unknown { gap, .. } => {
+                        ("url(#not-known)".to_owned(), gap.describe())
+                    }
+                };
+
+                let _ = write!(
+                    svg,
+                    r#"<rect x="{x:.2}" y="{bar_y:.1}" width="{width:.2}" height="{bar_height:.1}" fill="{fill}" rx="2"><title>{hover}</title></rect>"#,
+                    hover = escape(&hover)
+                );
+
+                // A boundary the venue publishes as the start of a process is not a hairline.
+                if let TimelineSegment::Phase { answer, .. } = segment
+                    && matches!(
+                        answer.boundary_start.uncertainty,
+                        Uncertainty::ProcessStart { .. }
+                    )
+                {
+                    let _ = write!(
+                        svg,
+                        r#"<rect x="{x:.2}" y="{bar_y:.1}" width="{fade:.2}" height="{bar_height:.1}" fill="url(#process-start)"/>"#,
+                        fade = width.min(16.0)
+                    );
+                }
+            }
+
+            let status = status_text(&row.timeline, view.now.as_ref());
+            if !status.is_empty() {
+                let _ = write!(
+                    svg,
+                    r#"<text x="{x:.0}" y="{text_y:.1}" fill="{fill}" font-size="12">{status}</text>"#,
+                    x = track_left + track_span + 14.0,
+                    fill = if status == "not known" {
+                        palette::ATTENTION
+                    } else {
+                        palette::MUTED
+                    },
+                    status = escape(&status)
+                );
+            }
+            cursor_y += row_height;
         }
     }
 
@@ -405,11 +450,11 @@ fn status_text(timeline: &Timeline, now: Option<&NowMarker>) -> String {
     }
 }
 
-fn source_lines(rows: &[Timeline]) -> Vec<String> {
+fn source_lines(rows: &[BoardRow]) -> Vec<String> {
     let mut lines = Vec::new();
     for row in rows {
         let mut seen: Vec<&str> = Vec::new();
-        for segment in &row.segments {
+        for segment in &row.timeline.segments {
             let TimelineSegment::Phase { answer, .. } = segment else {
                 continue;
             };
@@ -420,7 +465,7 @@ fn source_lines(rows: &[Timeline]) -> Vec<String> {
             }
         }
         if !seen.is_empty() {
-            lines.push(format!("{}: {}", row.venue, seen.join("   ")));
+            lines.push(format!("{}: {}", row.label, seen.join("   ")));
         }
     }
     lines

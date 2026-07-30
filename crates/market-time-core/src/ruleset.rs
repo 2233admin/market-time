@@ -5,6 +5,7 @@
 //! query path stays total, and "unknown versus error" stays a single line: unknown is
 //! about the query, an error is about the ruleset being invalid before any query ran.
 
+use crate::catalog::VenueProfile;
 use crate::coverage::CoverageRange;
 use crate::event::EventRule;
 use crate::evidence::EvidenceRef;
@@ -39,6 +40,8 @@ pub struct VenueRuleset {
     pub venue: VenueId,
     /// The venue's home zone, e.g. `"Asia/Shanghai"`.
     pub home_zone: IanaZoneId,
+    /// How the venue is presented. Display only; resolution ignores it.
+    pub profile: VenueProfile,
     /// What this data is willing to answer for.
     pub coverage: CoverageRange,
     /// The rules themselves.
@@ -155,6 +158,12 @@ impl Ruleset {
     #[must_use]
     pub fn venue(&self, venue: &VenueId) -> Option<&VenueRuleset> {
         self.venues.get(venue)
+    }
+
+    /// How a venue is presented, or `None` when the ruleset has no entry for it.
+    #[must_use]
+    pub fn profile(&self, venue: &VenueId) -> Option<&VenueProfile> {
+        self.venues.get(venue).map(|venue| &venue.profile)
     }
 
     /// One venue's home zone, resolved once at construction.

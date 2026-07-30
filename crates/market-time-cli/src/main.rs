@@ -8,7 +8,7 @@
 //! Domain and Data Constraints. Wide-area internet time synchronisation does not reach
 //! nanoseconds, and no surface here may imply that it does.
 
-use market_time_board::{BoardView, ClockDiscipline, NowMarker, SegmentDetail};
+use market_time_board::{BoardRow, BoardView, ClockDiscipline, NowMarker, SegmentDetail};
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
 use market_time_core::{
@@ -334,7 +334,12 @@ fn board_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result
     let rows = ruleset
         .venues()
         .iter()
-        .map(|venue| resolve_timeline(interval, venue, ruleset))
+        .map(|venue| {
+            BoardRow::new(
+                resolve_timeline(interval, venue, ruleset),
+                ruleset.profile(venue),
+            )
+        })
         .collect();
 
     let view = BoardView {

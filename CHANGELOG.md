@@ -54,6 +54,10 @@ ships here, now or ever.
   table as SSE publishes it, a mapping from the venue's own session names to the shared
   vocabulary, and a refusal to assign any interval the document leaves unlabelled without a
   ruling that carries its reasoning. It holds no session times.
+- **A venue catalog** — `AssetFamily` (a closed set: equities, spot and FX, futures) and
+  `VenueProfile` (display name, location, family). Both renderers group rows by family the
+  way a conventional board does, print the city under the venue's name, and report how many
+  venues are trading with not-known counted separately.
 - A synthetic three-venue fixture at
   `crates/market-time-data/fixtures/synthetic-venues.json`, so the tool can be run and
   verified without data anyone is forbidden to redistribute.

@@ -5,13 +5,26 @@ does not start until `venue-session-state` is delivered and archived. Every task
 on a first-party source and its terms check — no venue is added on the strength of appearing on
 someone else's board.
 
+## Status (2026-07-31)
+
+Tasks 1.1 and 1.3 landed early, out of order, because the board needed them: a board that
+cannot group its rows is not the board this product is aiming at. `AssetFamily` is a closed
+three-value vocabulary (equities, spot_and_fx, futures) and `VenueProfile` carries display
+name, location, and family. The dataset format carries all three as optional fields, a
+family outside the set fails to load, and both renderers group rows by family and report how
+many venues are trading — with not-known counted separately, because "12 trading" alone
+hides whether the rest are closed or simply unknown.
+
+What is still open here is the part that needs venues: per-venue coverage declarations
+beyond the launch set, session segment roles, and the derived session bands.
+
 ## 1. Catalog
 
-- [ ] 1.1 Define the venue catalog record — display name, location, home zone, asset-class
+- [x] 1.1 Define the venue catalog record — display name, location, home zone, asset-class
       family — in `crates/market-time-core/src/venue.rs`, with family as a closed enum
 - [ ] 1.2 Contract test in `crates/market-time-core/tests/contract/catalog.rs`: adding a venue
       introduces no phase name and no venue-specific branch in resolution
-- [ ] 1.3 Move the launch three onto catalog records, with no behaviour change
+- [x] 1.3 Move the launch three onto catalog records, with no behaviour change
 - [ ] 1.4 Per-venue coverage declaration in `crates/market-time-data`, replacing any assumption
       that the launch set shares one range
 

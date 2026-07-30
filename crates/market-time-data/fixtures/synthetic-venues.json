@@ -21,6 +21,9 @@
   "venues": [
     {
       "venue": "SYNTH-AUCT",
+      "display_name": "Synthetic Auction Exchange",
+      "location": "Shanghai",
+      "family": "equities",
       "home_zone": "Asia/Shanghai",
       "coverage": { "start": "2026-01-01T00:00:00Z", "end": "2026-12-31T16:00:00Z" },
       "evidence": [
@@ -83,6 +86,9 @@
     },
     {
       "venue": "SYNTH-DST",
+      "display_name": "Synthetic Daylight Exchange",
+      "location": "New York",
+      "family": "equities",
       "home_zone": "America/New_York",
       "coverage": { "start": "2026-01-01T05:00:00Z", "end": "2026-12-31T05:00:00Z" },
       "evidence": [
@@ -151,6 +157,9 @@
     },
     {
       "venue": "SYNTH-ALWAYS",
+      "display_name": "Synthetic Always-On Venue",
+      "location": "Global",
+      "family": "futures",
       "home_zone": "UTC",
       "coverage": { "start": "2026-01-01T00:00:00Z", "end": "2027-01-01T00:00:00Z" },
       "evidence": [

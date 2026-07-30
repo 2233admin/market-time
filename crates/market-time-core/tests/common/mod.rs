@@ -20,8 +20,8 @@ use jiff::civil::{Date, Time, Weekday, date};
 use market_time_core::CoverageRange;
 use market_time_core::Phase;
 use market_time_core::Uncertainty;
+use market_time_core::{AssetFamily, DatasetRevision, Ruleset, VenueProfile, VenueRuleset};
 use market_time_core::{CivilDaySchedule, DateRange, Rule, RuleKind};
-use market_time_core::{DatasetRevision, Ruleset, VenueRuleset};
 use market_time_core::{DatasetRevisionId, IanaZoneId, VenueId};
 use market_time_core::{DerivationNote, EvidenceRef};
 use market_time_core::{EventKind, EventRule};
@@ -108,6 +108,11 @@ pub fn auction_venue() -> VenueRuleset {
 
     VenueRuleset {
         venue: VenueId::new("SYNTH-AUCT").expect("valid identifier"),
+        profile: VenueProfile {
+            display_name: Some("Synthetic Auction Exchange".to_owned()),
+            location: Some("Shanghai".to_owned()),
+            family: Some(AssetFamily::Equities),
+        },
         home_zone: IanaZoneId::new("Asia/Shanghai").expect("valid identifier"),
         coverage: coverage("2026-01-01T00:00:00Z", "2026-12-31T16:00:00Z"),
         rules: vec![
@@ -171,6 +176,11 @@ pub fn dst_venue() -> VenueRuleset {
 
     VenueRuleset {
         venue: VenueId::new("SYNTH-DST").expect("valid identifier"),
+        profile: VenueProfile {
+            display_name: Some("Synthetic Daylight Exchange".to_owned()),
+            location: Some("New York".to_owned()),
+            family: Some(AssetFamily::Equities),
+        },
         home_zone: IanaZoneId::new("America/New_York").expect("valid identifier"),
         coverage: coverage("2026-01-01T05:00:00Z", "2026-12-31T05:00:00Z"),
         rules: vec![
@@ -226,6 +236,11 @@ pub fn dst_venue() -> VenueRuleset {
 pub fn always_on_venue() -> VenueRuleset {
     VenueRuleset {
         venue: VenueId::new("SYNTH-ALWAYS").expect("valid identifier"),
+        profile: VenueProfile {
+            display_name: Some("Synthetic Always-On Venue".to_owned()),
+            location: Some("Global".to_owned()),
+            family: Some(AssetFamily::Futures),
+        },
         home_zone: IanaZoneId::new("UTC").expect("valid identifier"),
         coverage: coverage("2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z"),
         rules: vec![Rule {

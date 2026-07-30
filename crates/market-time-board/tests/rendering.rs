@@ -1,6 +1,6 @@
 //! What the board must never do to an answer.
 
-use market_time_board::{BoardView, ClockDiscipline, NowMarker, glyph, render};
+use market_time_board::{BoardRow, BoardView, ClockDiscipline, NowMarker, glyph, render};
 use market_time_core::Phase;
 use market_time_core::VenueId;
 use market_time_core::{Interval, UtcInstant};
@@ -27,7 +27,12 @@ fn view(zone: &str, start: &str, end: &str, now: Option<&str>) -> BoardView {
         rows: ruleset
             .venues()
             .iter()
-            .map(|venue| resolve_timeline(interval, venue, &ruleset))
+            .map(|venue| {
+                BoardRow::new(
+                    resolve_timeline(interval, venue, &ruleset),
+                    ruleset.profile(venue),
+                )
+            })
             .collect(),
         now: now.map(|text| NowMarker {
             instant: instant(text),
@@ -53,8 +58,8 @@ fn unknown_never_renders_as_closed() {
     let rendered = render(&board);
     let dst_row = rendered
         .lines()
-        .find(|line| line.starts_with("SYNTH-DST"))
-        .expect("the board draws a row per venue");
+        .find(|line| line.starts_with("Synthetic Daylight"))
+        .expect("the board draws a row per venue, under its display name");
 
     assert!(
         dst_row.contains('?'),
@@ -76,11 +81,16 @@ fn changing_the_axis_zone_moves_no_segment() {
 
     for (left, right) in utc.rows.iter().zip(shanghai.rows.iter()) {
         assert_eq!(
-            left.segments.len(),
-            right.segments.len(),
+            left.timeline.segments.len(),
+            right.timeline.segments.len(),
             "the same interval yields the same segments whatever the axis is labelled in"
         );
-        for (a, b) in left.segments.iter().zip(right.segments.iter()) {
+        for (a, b) in left
+            .timeline
+            .segments
+            .iter()
+            .zip(right.timeline.segments.iter())
+        {
             assert_eq!(
                 a.interval(),
                 b.interval(),
@@ -145,7 +155,7 @@ fn the_board_draws_only_what_the_core_returned() {
 
     let board = BoardView {
         interval,
-        rows: vec![timeline],
+        rows: vec![BoardRow::new(timeline, None)],
         now: None,
         axis_zone: "UTC".to_owned(),
         columns: 24,
@@ -177,7 +187,7 @@ fn a_phase_answer_and_the_board_agree() {
     let rendered = render(&board);
     let row = rendered
         .lines()
-        .find(|line| line.starts_with("SYNTH-AUCT"))
+        .find(|line| line.starts_with("Synthetic Auction"))
         .expect("row present");
 
     assert!(
@@ -331,7 +341,7 @@ fn svg_text_from_data_cannot_close_a_tag() {
 
     let svg = market_time_board::render_svg(&BoardView {
         interval,
-        rows: vec![timeline],
+        rows: vec![BoardRow::new(timeline, None)],
         now: None,
         axis_zone: "UTC".to_owned(),
         columns: 24,

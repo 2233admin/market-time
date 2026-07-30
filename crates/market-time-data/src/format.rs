@@ -38,6 +38,15 @@ pub struct VenueRecord {
     pub venue: String,
     /// The venue's IANA home zone.
     pub home_zone: String,
+    /// The venue's name as it prefers to be called. Display only.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// The city or region the venue is identified by. Display only.
+    #[serde(default)]
+    pub location: Option<String>,
+    /// Which family the venue belongs to: `equities`, `spot_and_fx`, or `futures`.
+    #[serde(default)]
+    pub family: Option<String>,
     /// What the data is willing to answer for.
     pub coverage: CoverageRecord,
     /// Venue-level evidence.
