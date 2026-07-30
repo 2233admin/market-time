@@ -1,10 +1,14 @@
 //! What the board must never do to an answer.
 
-use market_time_board::{BoardRow, BoardView, ClockDiscipline, NowMarker, glyph, render};
+use market_time_board::{
+    BandSection, BoardRow, BoardView, ClockDiscipline, NowMarker, band_glyph, glyph, overlap_glyph,
+    render,
+};
 use market_time_core::Phase;
 use market_time_core::VenueId;
+use market_time_core::{BandDefinition, BandId, BandState, DerivationNote, OverlapState};
 use market_time_core::{Interval, UtcInstant};
-use market_time_core::{PhaseOutcome, Ruleset, resolve_timeline};
+use market_time_core::{PhaseOutcome, Ruleset, derive_band, derive_overlap, resolve_timeline};
 use market_time_data::load_ruleset;
 use std::path::PathBuf;
 
@@ -42,7 +46,56 @@ fn view(zone: &str, start: &str, end: &str, now: Option<&str>) -> BoardView {
         }),
         axis_zone: zone.to_owned(),
         columns: 48,
+        bands: BandSection::default(),
     }
+}
+
+/// A board over the fixture's three venues, with two real derived bands and their
+/// overlap attached — SYNTH-AUCT and SYNTH-DST grouped as one band, SYNTH-ALWAYS alone as
+/// the other, exactly as the CLI's own fixture bands are shaped (see
+/// `synthetic-venues.json`'s `_comment`), so these tests exercise the same derivation the
+/// core already proves correct rather than a hand-rolled stand-in for it.
+fn banded_view(zone: &str, start: &str, end: &str, now: Option<&str>) -> BoardView {
+    let mut board = view(zone, start, end, now);
+    let ruleset = ruleset();
+
+    let auct = VenueId::new("SYNTH-AUCT").expect("valid identifier");
+    let dst = VenueId::new("SYNTH-DST").expect("valid identifier");
+    let always = VenueId::new("SYNTH-ALWAYS").expect("valid identifier");
+
+    let regional = BandDefinition::new(
+        BandId::new("band-test-regional").expect("valid identifier"),
+        "Test Regional",
+        vec![auct.clone(), dst.clone()],
+        DerivationNote::new("test fixture grouping, not any real desk's").expect("non-empty"),
+    )
+    .expect("valid definition");
+    let continuous = BandDefinition::new(
+        BandId::new("band-test-continuous").expect("valid identifier"),
+        "Test Continuous",
+        vec![always.clone()],
+        DerivationNote::new("test fixture single-member band").expect("non-empty"),
+    )
+    .expect("valid definition");
+
+    let regional_timelines = vec![
+        resolve_timeline(board.interval, &auct, &ruleset),
+        resolve_timeline(board.interval, &dst, &ruleset),
+    ];
+    let continuous_timelines = vec![resolve_timeline(board.interval, &always, &ruleset)];
+
+    let regional_band =
+        derive_band(&regional, &regional_timelines).expect("the fixture's timelines derive");
+    let continuous_band =
+        derive_band(&continuous, &continuous_timelines).expect("the fixture's timelines derive");
+    let overlap =
+        derive_overlap(&regional_band, &continuous_band).expect("two distinct bands overlap");
+
+    board.bands = BandSection {
+        bands: vec![regional_band, continuous_band],
+        overlaps: vec![overlap],
+    };
+    board
 }
 
 #[test]
@@ -159,6 +212,7 @@ fn the_board_draws_only_what_the_core_returned() {
         now: None,
         axis_zone: "UTC".to_owned(),
         columns: 24,
+        bands: BandSection::default(),
     };
     let rendered = render(&board);
     assert!(rendered.contains("SYNTH-ABSENT"));
@@ -345,11 +399,147 @@ fn svg_text_from_data_cannot_close_a_tag() {
         now: None,
         axis_zone: "UTC".to_owned(),
         columns: 24,
+        bands: BandSection::default(),
     });
 
     assert!(!svg.contains("<script>"), "the tag never lands as markup");
     assert!(
         svg.contains("&lt;/text&gt;&lt;script&gt;"),
         "it lands as text"
+    );
+}
+
+#[test]
+fn a_view_with_zero_bands_renders_exactly_as_before_the_band_field_existed() {
+    let board = view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T02:00:00Z"),
+    );
+    assert!(board.bands.bands.is_empty(), "the helper carries no bands");
+
+    let text = render(&board);
+    let svg = market_time_board::render_svg(&board);
+
+    // The guarantee this test exists to pin down: a caller that never mentions bands gets
+    // a board byte-for-byte the same as it always was. Nothing about the band feature may
+    // leak into a zero-band render.
+    assert!(!text.contains("DERIVED"), "{text}");
+    assert!(!text.contains("bands key"), "{text}");
+    assert!(!svg.contains("DERIVED"), "{svg}");
+
+    // And rebuilding the same board with an explicitly empty `BandSection` — the only
+    // other way to spell "no bands" — must render identically, not merely similarly.
+    let mut rebuilt = board.clone();
+    rebuilt.bands = BandSection {
+        bands: Vec::new(),
+        overlaps: Vec::new(),
+    };
+    assert_eq!(
+        text,
+        render(&rebuilt),
+        "empty is empty however it was built"
+    );
+    assert_eq!(
+        svg,
+        market_time_board::render_svg(&rebuilt),
+        "same for the SVG renderer"
+    );
+}
+
+#[test]
+fn band_and_overlap_glyphs_never_collide_with_a_phase_glyph() {
+    let phases = [
+        Phase::Closed,
+        Phase::PreOpen,
+        Phase::OpeningAuction,
+        Phase::ClosingAuction,
+        Phase::ContinuousTrading,
+        Phase::MidDayBreak,
+        Phase::PostClose,
+        Phase::NonTradingInterruption,
+    ];
+    let band_glyphs = [
+        band_glyph(BandState::Trading),
+        band_glyph(BandState::NotTrading),
+        band_glyph(BandState::Unknown),
+    ];
+    let overlap_glyphs = [
+        overlap_glyph(OverlapState::Overlapping),
+        overlap_glyph(OverlapState::NotOverlapping),
+        overlap_glyph(OverlapState::Unknown),
+    ];
+
+    for derived_glyph in band_glyphs.iter().chain(overlap_glyphs.iter()) {
+        assert_ne!(
+            *derived_glyph, '?',
+            "not-known's glyph is reserved for a venue's own coverage gap, never a band's"
+        );
+        for phase in phases {
+            assert_ne!(
+                *derived_glyph,
+                glyph(phase),
+                "a band/overlap glyph must never read as a venue's phase glyph: {derived_glyph:?} vs {phase:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn band_rows_are_labelled_derived_and_show_their_own_reasoning() {
+    let board = banded_view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    let rendered = render(&board);
+
+    assert!(
+        rendered.contains("DERIVED BANDS"),
+        "a heading marks the section: {rendered}"
+    );
+    assert!(
+        rendered.contains("DERIVED OVERLAPS"),
+        "and the overlap section too: {rendered}"
+    );
+
+    let band_line = rendered
+        .lines()
+        .find(|line| line.contains("band-test-regional"))
+        .expect("the band row is printed");
+    assert!(
+        band_line.contains("(derived)"),
+        "a band row cannot be mistaken for a venue row: {band_line}"
+    );
+    assert!(
+        rendered.contains("test fixture grouping, not any real desk's"),
+        "the band's own derivation note is printed, not just its id: {rendered}"
+    );
+    assert!(
+        rendered.contains("computed as the overlap of session bands"),
+        "the overlap's own derivation note is printed too: {rendered}"
+    );
+}
+
+#[test]
+fn the_svg_board_hatches_an_unknown_band_stretch_with_the_same_pattern() {
+    // Past every synthetic venue's declared coverage: both members of the regional band
+    // are unknown throughout, so the whole band — and its overlap — reads Unknown here.
+    let board = banded_view("UTC", "2027-02-01T00:00:00Z", "2027-02-02T00:00:00Z", None);
+    let svg = market_time_board::render_svg(&board);
+
+    let heading_at = svg
+        .find("DERIVED SESSION BANDS")
+        .expect("the band section is drawn");
+    let hatch_at = svg
+        .rfind("url(#not-known)")
+        .expect("the hatch pattern is used somewhere in the document");
+
+    assert!(
+        hatch_at > heading_at,
+        "an unknown band stretch is hatched with the venue rows' own not-known pattern, \
+         inside the band section itself: {svg}"
     );
 }

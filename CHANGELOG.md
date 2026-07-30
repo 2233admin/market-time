@@ -51,7 +51,10 @@ ships here, now or ever.
   dataset's session bands over the same `--at`/`--hours` window `timeline` uses, and every
   unordered pair of the selected bands as a computed overlap — both carry their derivation
   note into the output, text or JSON, so neither can be mistaken for a venue-published
-  window.
+  window. `board` now derives and draws those same bands and overlaps by default, beneath
+  the venue rows, in both `--format text` and `--format svg`; `--no-bands` suppresses the
+  section, and a dataset with no bands declared renders with no section either way — never
+  an empty one.
 - **`market-time-board`** — the timeline board. One row per venue, phases across a shared
   axis, a marker on the instant being viewed, the viewer's zone as axis labelling only.
   Unknown renders distinctly from closed. `inspect` returns what a segment rests on, and the
@@ -59,6 +62,16 @@ ships here, now or ever.
   self-contained SVG — the shape a global trading-hours board is recognised in — keeping
   every honesty rule the text renderer has: status in words, hatching for not-known, a soft
   edge on a process-start boundary, and the sources underneath.
+  - `BoardView` gains a `bands: BandSection` field — the caller's already-derived
+    `SessionBand`s and `BandOverlap`s, drawn as their own rows beneath the venue section in
+    both renderers. `BandSection` defaults to empty, and empty renders nothing — no
+    heading, no placeholder — so every caller and test that predates bands renders
+    byte-identically to before. A band or an overlap is never a venue's published
+    schedule, and neither renderer lets a reader forget it: every row is labelled
+    "derived," and `band_glyph`/`overlap_glyph` (`+`/`~`/`x`) are their own vocabulary,
+    never `glyph`'s phase characters. An `Unknown` band or overlap stretch uses the same
+    `url(#not-known)` hatch the venue rows already use — the one visual promise this board
+    makes about "not known," kept consistent rather than duplicated.
 - **The operator path** — `SourceRegistration` (which cannot be built without the terms the
   source may be used under), the `SourceFetcher` trait with a `FileFetcher` implementation,
   and `RevisionAssembly`, which transcribes evidence from the retrieval — URL, fetch time,
@@ -86,7 +99,7 @@ ships here, now or ever.
 
 ### Verification
 
-76 tests, including 24 golden vectors and two mechanical Principle IV guards. `cargo fmt`,
+143 tests, including 24 golden vectors and two mechanical Principle IV guards. `cargo fmt`,
 `clippy -D warnings`, and `cargo test --workspace` all clean. Quickstart validation recorded
 in `docs/venue-session-state/quickstart-results.md`.
 

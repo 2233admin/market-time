@@ -8,7 +8,9 @@
 //! Domain and Data Constraints. Wide-area internet time synchronisation does not reach
 //! nanoseconds, and no surface here may imply that it does.
 
-use market_time_board::{BoardRow, BoardView, ClockDiscipline, NowMarker, SegmentDetail};
+use market_time_board::{
+    BandSection, BoardRow, BoardView, ClockDiscipline, NowMarker, SegmentDetail,
+};
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
 use market_time_core::{
@@ -32,7 +34,7 @@ market-time — what phase is a venue in, and how well is that known?
 USAGE
   market-time phase    --dataset <path> [--venue <id>] [--at <rfc3339|now>] [--format text|json]
   market-time evidence --dataset <path>  --venue <id> [--at <rfc3339|now>] [--format text|json]
-  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg]
+  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg] [--no-bands]
   market-time timeline --dataset <path>  --venue <id> [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time bands    --dataset <path> [--band <id>]... [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time venues   --dataset <path>
@@ -52,6 +54,13 @@ NOTES
   --format svg on `board` writes a self-contained SVG to stdout: redirect it to a file and
   open it. Colour is never the only channel there either — every row is labelled, and an
   out-of-coverage stretch is hatched rather than merely paler.
+
+  `board` also derives every session band the dataset declares (over the same window as
+  its venue rows) and every pairwise overlap between them, and draws both beneath the
+  venue rows — labelled DERIVED throughout, in a glyph vocabulary that is never the phase
+  vocabulary, because a band is not a phase (see `bands` below). --no-bands suppresses that
+  section entirely; a dataset with no bands declared renders with no section either way, not
+  an empty one.
 
   --format json is the shape for machines. Uncertainty and unknown are fields there, not
   prose: an unknown answer has \"phase\": null and a stated reason, never \"closed\".
@@ -98,7 +107,7 @@ fn run(args: &[String]) -> Result<String, String> {
     match command {
         "phase" => phase_command(ruleset, &options, now),
         "evidence" => evidence_command(ruleset, &options, now),
-        "board" => board_command(ruleset, &options, now),
+        "board" => board_command(ruleset, &dataset.bands, &options, now),
         "timeline" => timeline_command(ruleset, &options, now),
         "bands" => bands_command(ruleset, &dataset.bands, &options, now),
         "venues" => Ok(ruleset
@@ -342,7 +351,48 @@ fn render_outcome(venue: &VenueId, outcome: &PhaseOutcome) -> String {
     }
 }
 
-fn board_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result<String, String> {
+/// Derives every band in `definitions` over `interval`, plus every unordered pairwise
+/// overlap between them.
+///
+/// Shared by `board` (which always wants every band the dataset declares) and `bands`
+/// (which wants only the ones `--band` selected, or `select_bands`'s reading of "none
+/// named means every one"): the derive-then-overlap step itself does not differ between
+/// the two commands, only which definitions it is handed.
+///
+/// # Errors
+///
+/// Returns whatever [`derive_band`] or [`derive_overlap`] rejected, as a message.
+fn derive_all(
+    definitions: &[BandDefinition],
+    ruleset: &Ruleset,
+    interval: Interval,
+) -> Result<(Vec<SessionBand>, Vec<BandOverlap>), String> {
+    let mut bands: Vec<SessionBand> = Vec::with_capacity(definitions.len());
+    for definition in definitions {
+        let timelines: Vec<_> = definition
+            .members()
+            .iter()
+            .map(|venue| resolve_timeline(interval, venue, ruleset))
+            .collect();
+        bands.push(derive_band(definition, &timelines).map_err(|error| error.to_string())?);
+    }
+
+    let mut overlaps: Vec<BandOverlap> = Vec::new();
+    for (index, left) in bands.iter().enumerate() {
+        for right in &bands[index + 1..] {
+            overlaps.push(derive_overlap(left, right).map_err(|error| error.to_string())?);
+        }
+    }
+
+    Ok((bands, overlaps))
+}
+
+fn board_command(
+    ruleset: &Ruleset,
+    band_definitions: &[BandDefinition],
+    options: &Options,
+    now: NowMarker,
+) -> Result<String, String> {
     let interval = options.window(now.instant)?;
     let rows = ruleset
         .venues()
@@ -355,12 +405,23 @@ fn board_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result
         })
         .collect();
 
+    // `--no-bands` suppresses the section outright: with no bands and no overlaps handed
+    // to `BoardView`, `market_time_board::BandSection::is_empty` is true and the renderers
+    // draw nothing for it — no empty heading, no placeholder line.
+    let bands = if options.no_bands {
+        BandSection::default()
+    } else {
+        let (bands, overlaps) = derive_all(band_definitions, ruleset, interval)?;
+        BandSection { bands, overlaps }
+    };
+
     let view = BoardView {
         interval,
         rows,
         now: Some(now),
         axis_zone: options.zone.clone(),
         columns: options.columns,
+        bands,
     };
 
     if options.format == Format::Svg {
@@ -448,23 +509,7 @@ fn bands_command(
 ) -> Result<String, String> {
     let selected = options.select_bands(definitions)?;
     let interval = options.window(now.instant)?;
-
-    let mut bands: Vec<SessionBand> = Vec::with_capacity(selected.len());
-    for definition in &selected {
-        let timelines: Vec<_> = definition
-            .members()
-            .iter()
-            .map(|venue| resolve_timeline(interval, venue, ruleset))
-            .collect();
-        bands.push(derive_band(definition, &timelines).map_err(|error| error.to_string())?);
-    }
-
-    let mut overlaps: Vec<BandOverlap> = Vec::new();
-    for (index, left) in bands.iter().enumerate() {
-        for right in &bands[index + 1..] {
-            overlaps.push(derive_overlap(left, right).map_err(|error| error.to_string())?);
-        }
-    }
+    let (bands, overlaps) = derive_all(&selected, ruleset, interval)?;
 
     if options.format == Format::Json {
         return Ok(pretty(&bands_json(&bands, &overlaps)));
@@ -670,6 +715,7 @@ struct Options {
     dataset: Option<PathBuf>,
     venue: Option<String>,
     bands: Vec<String>,
+    no_bands: bool,
     at: Option<String>,
     at_zone: Option<String>,
     zone: String,
@@ -684,6 +730,7 @@ impl Options {
             dataset: None,
             venue: None,
             bands: Vec::new(),
+            no_bands: false,
             at: None,
             at_zone: None,
             zone: "UTC".to_owned(),
@@ -700,10 +747,18 @@ impl Options {
                     .cloned()
                     .ok_or_else(|| format!("{flag} needs a value"))
             };
+            // Every flag but `--no-bands` takes a value and so advances two args; `--no-bands`
+            // is a bare switch and advances one. Declared per-iteration rather than as a
+            // constant so a future bare switch has an obvious place to set it too.
+            let mut step = 2;
             match flag {
                 "--dataset" => options.dataset = Some(PathBuf::from(value()?)),
                 "--venue" => options.venue = Some(value()?),
                 "--band" => options.bands.push(value()?),
+                "--no-bands" => {
+                    options.no_bands = true;
+                    step = 1;
+                }
                 "--at" => options.at = Some(value()?),
                 "--at-zone" => options.at_zone = Some(value()?),
                 "--zone" => options.zone = value()?,
@@ -729,7 +784,7 @@ impl Options {
                 }
                 other => return Err(format!("unknown option {other:?}")),
             }
-            index += 2;
+            index += step;
         }
 
         Ok(options)

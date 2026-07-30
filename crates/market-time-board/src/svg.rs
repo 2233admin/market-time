@@ -21,10 +21,15 @@
 //! No dependency, no font loading, no script: the output is a self-contained SVG string
 //! that opens anywhere and diffs cleanly.
 
-use crate::{BoardRow, BoardView, NowMarker, grouped, trading_count};
+use crate::{
+    BoardRow, BoardView, NowMarker, band_label, band_state_word, grouped, overlap_label,
+    overlap_state_word, trading_count,
+};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use market_time_core::{Interval, Phase, Timeline, TimelineSegment, Uncertainty, UtcInstant};
+use market_time_core::{
+    BandState, Interval, OverlapState, Phase, Timeline, TimelineSegment, Uncertainty, UtcInstant,
+};
 use std::fmt::Write as _;
 
 /// Colours, named once. Keeping them out of the markup strings also keeps those strings
@@ -47,7 +52,22 @@ mod palette {
     pub const CLOSED: &str = "#30363d";
     pub const HALTED: &str = "#f85149";
     pub const UNHANDLED: &str = "#db6d28";
+    // The derived band/overlap section's own colours — deliberately not the phase palette
+    // above, so a band row is distinguishable from a venue row by colour too, not only by
+    // its shorter track and its "(derived)" label.
+    pub const BAND_TRADING: &str = "#3fb950";
+    pub const BAND_NOT_TRADING: &str = "#21262d";
+    pub const OVERLAP_TRADING: &str = "#d2a8ff";
 }
+
+/// Layout constants for the derived band section, shared between the height calculation
+/// and the drawing pass so the two cannot drift apart — a mismatch there would either
+/// clip a row or leave dead canvas beneath it.
+const BAND_ROW_SCALE: f64 = 0.72;
+const BAND_SECTION_TOP_GAP: f64 = 24.0;
+const BAND_HEADING_HEIGHT: f64 = 20.0;
+const BAND_OVERLAP_GAP: f64 = 6.0;
+const BAND_SECTION_NOTE_GAP: f64 = 24.0;
 
 /// Layout.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +126,10 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
     } else {
         Vec::new()
     };
-    let height = header + all_rows + 78.0 + 15.0 * count_as_f64(sources.len());
+    // Zero when there is nothing to draw, so a zero-band view's canvas is exactly the
+    // height it always was — not a pixel added for a section that never appears.
+    let band_extra = band_section_height(view, options);
+    let height = header + all_rows + 78.0 + 15.0 * count_as_f64(sources.len()) + band_extra;
 
     let mut svg = String::new();
     let _ = write!(
@@ -350,8 +373,216 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
         );
     }
 
+    if !view.bands.is_empty() {
+        let band_top = height - band_extra;
+        render_band_section(&mut svg, view, options, band_top, track_left, track_span);
+    }
+
     svg.push_str("</svg>");
     svg
+}
+
+/// The extra canvas height the derived band section needs, or exactly `0.0` with no bands
+/// to draw.
+///
+/// Kept in lock-step with [`render_band_section`]'s own cursor arithmetic through the
+/// shared `BAND_*` constants, so the canvas this function sizes and the section that
+/// function draws can never disagree about how tall it is.
+fn band_section_height(view: &BoardView, options: &SvgOptions) -> f64 {
+    if view.bands.bands.is_empty() {
+        return 0.0;
+    }
+    let band_row_height = f64::from(options.row_height) * BAND_ROW_SCALE;
+    let mut height = BAND_SECTION_TOP_GAP + BAND_HEADING_HEIGHT;
+    height += band_row_height * count_as_f64(view.bands.bands.len());
+    if !view.bands.overlaps.is_empty() {
+        height += BAND_OVERLAP_GAP + BAND_HEADING_HEIGHT;
+        height += band_row_height * count_as_f64(view.bands.overlaps.len());
+    }
+    height + BAND_SECTION_NOTE_GAP
+}
+
+/// Renders the derived band and overlap rows beneath the venue section, as a fully
+/// separate pass appended after everything the board already draws.
+///
+/// A zero-band view never calls this function at all (see the call site above), so it
+/// cannot add a byte of markup or a pixel of height to a board that has nothing derived to
+/// show. Where it is called, three independent signals mark every row as derived rather
+/// than a venue's published schedule, in case a viewer misses one: the section heading
+/// says DERIVED, the row's own label carries a "(derived)" tag, and the track is drawn
+/// shorter than a venue row's. An unknown stretch still uses `url(#not-known)` — the same
+/// hatch pattern the venue rows use — because that visual promise ("an unknown is not a
+/// closed market") is the product's, not the venue section's alone, and a band's unknown
+/// stretch deserves exactly the same honesty.
+fn render_band_section(
+    svg: &mut String,
+    view: &BoardView,
+    options: &SvgOptions,
+    top: f64,
+    track_left: f64,
+    track_span: f64,
+) {
+    let band_row_height = f64::from(options.row_height) * BAND_ROW_SCALE;
+    let mut cursor_y = top + BAND_SECTION_TOP_GAP;
+
+    let _ = write!(
+        svg,
+        r#"<line x1="24" y1="{top:.1}" x2="{x2:.1}" y2="{top:.1}" stroke="{stroke}" stroke-width="1" stroke-dasharray="3,3"/>"#,
+        x2 = f64::from(options.width) - 24.0,
+        stroke = palette::GRID
+    );
+    let _ = write!(
+        svg,
+        r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11" font-weight="600" letter-spacing="0.6">DERIVED SESSION BANDS — never a venue's published schedule</text>"#,
+        y = cursor_y + 4.0,
+        fill = palette::ATTENTION
+    );
+    cursor_y += BAND_HEADING_HEIGHT;
+
+    for band in &view.bands.bands {
+        let geometry = BarGeometry {
+            track_left,
+            track_span,
+            bar_y: cursor_y + 4.0,
+            bar_height: (band_row_height - 8.0).max(4.0),
+        };
+        let segments = band.segments().iter().map(|segment| {
+            let fill = match segment.state {
+                BandState::Unknown => "url(#not-known)".to_owned(),
+                BandState::Trading => palette::BAND_TRADING.to_owned(),
+                BandState::NotTrading => palette::BAND_NOT_TRADING.to_owned(),
+                _ => palette::UNHANDLED.to_owned(),
+            };
+            let hover =
+                band_hover_text(band_state_word(segment.state), segment.uncertainty.as_ref());
+            (segment.interval, fill, hover)
+        });
+        render_derived_row(svg, &band_label(band), segments, view.interval, &geometry);
+        cursor_y += band_row_height;
+    }
+
+    if !view.bands.overlaps.is_empty() {
+        cursor_y += BAND_OVERLAP_GAP;
+        let _ = write!(
+            svg,
+            r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11" font-weight="600" letter-spacing="0.6">DERIVED OVERLAPS</text>"#,
+            y = cursor_y + 4.0,
+            fill = palette::ATTENTION
+        );
+        cursor_y += BAND_HEADING_HEIGHT;
+
+        for overlap in &view.bands.overlaps {
+            let geometry = BarGeometry {
+                track_left,
+                track_span,
+                bar_y: cursor_y + 4.0,
+                bar_height: (band_row_height - 8.0).max(4.0),
+            };
+            let segments = overlap.segments().iter().map(|segment| {
+                let fill = match segment.state {
+                    OverlapState::Unknown => "url(#not-known)".to_owned(),
+                    OverlapState::Overlapping => palette::OVERLAP_TRADING.to_owned(),
+                    OverlapState::NotOverlapping => palette::BAND_NOT_TRADING.to_owned(),
+                    _ => palette::UNHANDLED.to_owned(),
+                };
+                let hover = band_hover_text(
+                    overlap_state_word(segment.state),
+                    segment.uncertainty.as_ref(),
+                );
+                (segment.interval, fill, hover)
+            });
+            render_derived_row(
+                svg,
+                &overlap_label(overlap),
+                segments,
+                view.interval,
+                &geometry,
+            );
+            cursor_y += band_row_height;
+        }
+    }
+
+    let _ = write!(
+        svg,
+        r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11">{note}</text>"#,
+        y = cursor_y + 16.0,
+        fill = palette::FAINT,
+        note = escape(&format!(
+            "bands and overlaps are computed groupings, never a venue's published hours — {}",
+            crate::band_legend()
+        ))
+    );
+}
+
+/// Where and how tall one derived row's track is drawn.
+///
+/// Bundled so [`render_derived_row`] takes one geometry argument instead of four loose
+/// numbers — the same track position and bar height a band row and an overlap row share,
+/// just computed fresh per row as `cursor_y` advances.
+struct BarGeometry {
+    track_left: f64,
+    track_span: f64,
+    bar_y: f64,
+    bar_height: f64,
+}
+
+/// Draws one band or overlap row: its label with the "(derived)" tag, a track drawn with a
+/// dashed border (never a venue row's plain one), and each segment placed exactly as a
+/// venue row's segments are — through the same [`placement`] — and filled with whatever
+/// colour and hover text the caller already resolved for its state.
+///
+/// Shared by both loops in [`render_band_section`] because the layout is identical between
+/// a band row and an overlap row; only the state-to-colour mapping differs, and that stays
+/// with each caller rather than becoming a parameter this function would have to branch on.
+fn render_derived_row(
+    svg: &mut String,
+    label: &str,
+    segments: impl Iterator<Item = (Interval, String, String)>,
+    interval: Interval,
+    geometry: &BarGeometry,
+) {
+    let &BarGeometry {
+        track_left,
+        track_span,
+        bar_y,
+        bar_height,
+    } = geometry;
+
+    let _ = write!(
+        svg,
+        r#"<text x="24" y="{text_y:.1}" fill="{fill}" font-size="12">{label} <tspan fill="{muted}" font-size="10">(derived)</tspan></text>"#,
+        text_y = bar_y + bar_height * 0.85,
+        fill = palette::LABEL,
+        label = escape(label),
+        muted = palette::FAINT,
+    );
+    let _ = write!(
+        svg,
+        r#"<rect x="{track_left:.1}" y="{bar_y:.1}" width="{track_span:.1}" height="{bar_height:.1}" fill="{fill}" stroke="{stroke}" stroke-width="1" stroke-dasharray="2,2" rx="2"/>"#,
+        fill = palette::TRACK,
+        stroke = palette::FAINT
+    );
+
+    for (segment_interval, fill, hover) in segments {
+        let Some((x, width)) = placement(interval, segment_interval, track_left, track_span) else {
+            continue;
+        };
+        let _ = write!(
+            svg,
+            r#"<rect x="{x:.2}" y="{bar_y:.1}" width="{width:.2}" height="{bar_height:.1}" fill="{fill}" rx="2"><title>{hover}</title></rect>"#,
+            hover = escape(&hover)
+        );
+    }
+}
+
+/// The hover title for one band or overlap segment: its state in words, then how
+/// precisely it is known — or, when nothing is known at all (`BandSegment::uncertainty`'s
+/// `None` case), a sentence saying so rather than a blank that could be misread as exact.
+fn band_hover_text(state_word: &str, uncertainty: Option<&Uncertainty>) -> String {
+    match uncertainty {
+        Some(uncertainty) => format!("{state_word} · {uncertainty}"),
+        None => format!("{state_word} · no schedule known for this stretch"),
+    }
 }
 
 fn defs() -> String {

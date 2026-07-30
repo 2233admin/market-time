@@ -111,11 +111,44 @@ What the board MAY do, because it is presentation and not decision: choose layou
 from `Phase` variant to a visual style, locale/timezone formatting of an instant for the viewer's
 convenience (formatting, not recomputing), and ordering of venue tiles.
 
+## Derived session bands and overlaps
+
+The board may also draw a `BandSection`: the caller's already-derived `SessionBand`s and
+`BandOverlap`s (both `market-time-core` types — the board does not derive them itself, the
+same "no domain logic" rule that governs everything else here). This is additive, not a
+second mode: `BandSection::default()` is empty, and an empty section renders nothing —
+no heading, no placeholder row — so a caller that never mentions bands gets exactly the
+board this contract already describes.
+
+A band and an overlap are not a venue's published schedule (`market-time-core`'s `bands`
+module docs: a band is derived from its members, never itself evidenced). Where the board
+draws one, it MUST make that unmistakable:
+
+- every band row and overlap row is labelled "derived," not merely grouped under a heading
+  that says so — a reader must not be able to mistake a band row for a venue row above it;
+- the glyph and colour vocabulary for a band's or an overlap's state (trading-like / not /
+  unknown) MUST NOT be the vocabulary `glyph`/`phase_fill` use for a `Phase` — a band state
+  is not a phase, and reusing that vocabulary would let a band row be misread as a venue's
+  own published state;
+- an `Unknown` band or overlap stretch MUST use the same not-known hatch treatment the
+  venue rows use for an out-of-coverage stretch — that visual promise ("an unknown is not
+  a closed market") is the product's, not the venue section's alone.
+
+`BandSegment::uncertainty` and `OverlapSegment::uncertainty` are `Option<Uncertainty>`,
+`None` exactly when every contributing member is itself unknown for that stretch. The
+board MUST NOT render that `None` as "exact" or drop it silently; it renders as its own
+stated absence ("no schedule known for this stretch"), same as everywhere else in this
+product that a `None` uncertainty appears.
+
 ## Violations
 
 The board is non-conforming if it: reads the clock more than once per render or lets venues in
 one render disagree on "now"; displays "now" without a clock-discipline annotation, or falls back
 to an exact-looking clock when discipline data is unavailable; renders an unknown venue as
 `Closed`, blank, or otherwise indistinguishable from a confident answer; computes any value
-`core-api.md` was responsible for producing; or persists rule data/evidence across renders
-instead of taking it fresh from each `resolve_phases` call.
+`core-api.md` was responsible for producing; persists rule data/evidence across renders
+instead of taking it fresh from each `resolve_phases` call; draws a band or overlap row
+without labelling it derived; draws a band's or overlap's state in the same glyph or colour
+vocabulary as a `Phase`; renders an `Unknown` band or overlap stretch with anything other
+than the venue section's own not-known hatch; or renders an empty `BandSection` as anything
+other than exactly the board this contract describes with no bands at all.

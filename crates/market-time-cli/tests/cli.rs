@@ -592,6 +592,88 @@ fn selecting_one_band_prints_no_overlap_section() {
 }
 
 #[test]
+fn the_board_shows_the_dataset_bands_by_default() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(text.contains("DERIVED BANDS"), "{text}");
+    assert!(text.contains("DERIVED OVERLAPS"), "{text}");
+    assert!(text.contains("band-regional-equities"), "{text}");
+    assert!(text.contains("band-continuous-markets"), "{text}");
+    assert!(text.contains("(derived)"), "{text}");
+    assert!(
+        text.contains("not any real desk's grouping"),
+        "the band's own derivation note reaches the board, not just its id: {text}"
+    );
+}
+
+#[test]
+fn no_bands_suppresses_the_band_section_entirely() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+        "--no-bands",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(!text.contains("DERIVED"), "{text}");
+    assert!(!text.contains("band-regional-equities"), "{text}");
+    assert!(!text.contains("band-continuous-markets"), "{text}");
+}
+
+#[test]
+fn the_svg_board_shows_the_band_section_and_stays_well_formed() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+        "--format",
+        "svg",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let svg = stdout(&output);
+    assert!(svg.trim_start().starts_with("<svg"), "{svg}");
+    assert!(svg.contains("</svg>"), "{svg}");
+    assert!(svg.contains("DERIVED SESSION BANDS"), "{svg}");
+    assert!(svg.contains("DERIVED OVERLAPS"), "{svg}");
+    assert!(svg.contains("(derived)"), "{svg}");
+}
+
+#[test]
+fn no_bands_suppresses_the_svg_band_section_too() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+        "--format",
+        "svg",
+        "--no-bands",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let svg = stdout(&output);
+    assert!(svg.trim_start().starts_with("<svg"), "{svg}");
+    assert!(svg.contains("</svg>"), "{svg}");
+    assert!(!svg.contains("DERIVED"), "{svg}");
+}
+
+#[test]
 fn an_unknown_band_id_fails_loudly() {
     let output = run(&["bands", "--dataset", &fixture(), "--band", "no-such-band"]);
     assert!(
