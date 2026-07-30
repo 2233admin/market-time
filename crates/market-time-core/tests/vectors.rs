@@ -7,14 +7,18 @@
 mod common;
 
 use common::{instant, interval, ruleset, venue_ids};
-use market_time_core::event::EventKind;
-use market_time_core::ids::VenueId;
-use market_time_core::phase::Phase;
-use market_time_core::uncertainty::Uncertainty;
+use market_time_core::EventKind;
+use market_time_core::Phase;
+use market_time_core::Uncertainty;
+use market_time_core::VenueId;
 use market_time_core::{PhaseOutcome, resolve_phase, resolve_phases, resolve_timeline};
 
 fn phase_at(venue: &str, at: &str) -> PhaseOutcome {
-    resolve_phase(instant(at), &VenueId::new(venue), &ruleset())
+    resolve_phase(
+        instant(at),
+        &VenueId::new(venue).expect("valid identifier"),
+        &ruleset(),
+    )
 }
 
 fn known(venue: &str, at: &str) -> market_time_core::PhaseAnswer {
@@ -201,7 +205,7 @@ fn v014_a_venue_published_bound_is_carried_unchanged() {
 
     match &settlement.uncertainty {
         Uncertainty::PublishedBound { nanos, .. } => {
-            assert_eq!(*nanos, 15 * market_time_core::instant::NANOS_PER_SECOND);
+            assert_eq!(*nanos, 15 * market_time_core::NANOS_PER_SECOND);
         }
         other => panic!("expected the venue's published bound, got {other}"),
     }
@@ -256,9 +260,9 @@ fn v017_three_venues_three_states_at_one_instant() {
 #[test]
 fn v018_one_venue_out_of_coverage_does_not_void_the_others() {
     let venues = vec![
-        VenueId::new("SYNTH-ALWAYS"),
-        VenueId::new("SYNTH-NOT-TRACKED"),
-        VenueId::new("SYNTH-AUCT"),
+        VenueId::new("SYNTH-ALWAYS").expect("valid identifier"),
+        VenueId::new("SYNTH-NOT-TRACKED").expect("valid identifier"),
+        VenueId::new("SYNTH-AUCT").expect("valid identifier"),
     ];
     let outcomes = resolve_phases(instant("2026-07-30T02:00:00Z"), &venues, &ruleset());
 
@@ -278,7 +282,7 @@ fn v018_one_venue_out_of_coverage_does_not_void_the_others() {
 fn v019_a_trading_day_tiles_without_gaps() {
     let timeline = resolve_timeline(
         interval("2026-07-30T00:00:00Z", "2026-07-31T00:00:00Z"),
-        &VenueId::new("SYNTH-AUCT"),
+        &VenueId::new("SYNTH-AUCT").expect("valid identifier"),
         &ruleset(),
     );
 
@@ -299,7 +303,7 @@ fn v019_a_trading_day_tiles_without_gaps() {
 fn v020_a_timeline_crossing_the_coverage_edge_answers_both_sides() {
     let timeline = resolve_timeline(
         interval("2026-12-31T00:00:00Z", "2027-01-02T00:00:00Z"),
-        &VenueId::new("SYNTH-ALWAYS"),
+        &VenueId::new("SYNTH-ALWAYS").expect("valid identifier"),
         &ruleset(),
     );
 
@@ -328,7 +332,7 @@ impl TimelineSegmentExt for market_time_core::TimelineSegment {
 fn v021_an_always_on_venue_is_one_segment_not_seven() {
     let timeline = resolve_timeline(
         interval("2026-06-01T00:00:00Z", "2026-06-08T00:00:00Z"),
-        &VenueId::new("SYNTH-ALWAYS"),
+        &VenueId::new("SYNTH-ALWAYS").expect("valid identifier"),
         &ruleset(),
     );
 
@@ -343,9 +347,13 @@ fn v021_an_always_on_venue_is_one_segment_not_seven() {
 #[test]
 fn v022_every_minute_of_a_day_belongs_to_exactly_one_segment() {
     let day = interval("2026-07-30T00:00:00Z", "2026-07-31T00:00:00Z");
-    let timeline = resolve_timeline(day, &VenueId::new("SYNTH-DST"), &ruleset());
+    let timeline = resolve_timeline(
+        day,
+        &VenueId::new("SYNTH-DST").expect("valid identifier"),
+        &ruleset(),
+    );
 
-    let minute_nanos = 60 * market_time_core::instant::NANOS_PER_SECOND;
+    let minute_nanos = 60 * market_time_core::NANOS_PER_SECOND;
     let mut at = day.start;
     while at < day.end {
         let hits = timeline

@@ -17,20 +17,20 @@
 #![allow(dead_code)]
 
 use jiff::civil::{Date, Time, Weekday, date};
-use market_time_core::coverage::CoverageRange;
-use market_time_core::event::{EventKind, EventRule};
-use market_time_core::evidence::{DerivationNote, EvidenceRef};
-use market_time_core::ids::{DatasetRevisionId, IanaZoneId, VenueId};
-use market_time_core::instant::{Interval, UtcInstant};
-use market_time_core::phase::Phase;
-use market_time_core::rule::{CivilDaySchedule, DateRange, Rule, RuleKind};
-use market_time_core::ruleset::{DatasetRevision, Ruleset, VenueRuleset};
-use market_time_core::uncertainty::Uncertainty;
+use market_time_core::CoverageRange;
+use market_time_core::Phase;
+use market_time_core::Uncertainty;
+use market_time_core::{CivilDaySchedule, DateRange, Rule, RuleKind};
+use market_time_core::{DatasetRevision, Ruleset, VenueRuleset};
+use market_time_core::{DatasetRevisionId, IanaZoneId, VenueId};
+use market_time_core::{DerivationNote, EvidenceRef};
+use market_time_core::{EventKind, EventRule};
+use market_time_core::{Interval, UtcInstant};
 
 /// The revision every synthetic rule cites.
 #[must_use]
 pub fn revision_id() -> DatasetRevisionId {
-    DatasetRevisionId::new("synthetic-2026-07-30")
+    DatasetRevisionId::new("synthetic-2026-07-30").expect("valid identifier")
 }
 
 #[must_use]
@@ -107,8 +107,8 @@ pub fn auction_venue() -> VenueRuleset {
     ]);
 
     VenueRuleset {
-        venue: VenueId::new("SYNTH-AUCT"),
-        home_zone: IanaZoneId::new("Asia/Shanghai"),
+        venue: VenueId::new("SYNTH-AUCT").expect("valid identifier"),
+        home_zone: IanaZoneId::new("Asia/Shanghai").expect("valid identifier"),
         coverage: coverage("2026-01-01T00:00:00Z", "2026-12-31T16:00:00Z"),
         rules: vec![
             Rule {
@@ -170,8 +170,8 @@ pub fn dst_venue() -> VenueRuleset {
     ]);
 
     VenueRuleset {
-        venue: VenueId::new("SYNTH-DST"),
-        home_zone: IanaZoneId::new("America/New_York"),
+        venue: VenueId::new("SYNTH-DST").expect("valid identifier"),
+        home_zone: IanaZoneId::new("America/New_York").expect("valid identifier"),
         coverage: coverage("2026-01-01T05:00:00Z", "2026-12-31T05:00:00Z"),
         rules: vec![
             Rule {
@@ -225,8 +225,8 @@ pub fn dst_venue() -> VenueRuleset {
 #[must_use]
 pub fn always_on_venue() -> VenueRuleset {
     VenueRuleset {
-        venue: VenueId::new("SYNTH-ALWAYS"),
-        home_zone: IanaZoneId::new("UTC"),
+        venue: VenueId::new("SYNTH-ALWAYS").expect("valid identifier"),
+        home_zone: IanaZoneId::new("UTC").expect("valid identifier"),
         coverage: coverage("2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z"),
         rules: vec![Rule {
             kind: RuleKind::WeeklyPattern {
@@ -257,7 +257,7 @@ pub fn always_on_venue() -> VenueRuleset {
             ],
             applies: dates(date(2026, 1, 1), date(2026, 12, 31)),
             uncertainty: Uncertainty::PublishedBound {
-                nanos: 15 * market_time_core::instant::NANOS_PER_SECOND,
+                nanos: 15 * market_time_core::NANOS_PER_SECOND,
                 published_as: "the venue publishes a 15-second deviation".to_owned(),
             },
             evidence: evidence("https://synthetic.test/always/funding"),
@@ -286,8 +286,8 @@ pub fn ruleset() -> Ruleset {
 #[must_use]
 pub fn venue_ids() -> Vec<VenueId> {
     vec![
-        VenueId::new("SYNTH-ALWAYS"),
-        VenueId::new("SYNTH-AUCT"),
-        VenueId::new("SYNTH-DST"),
+        VenueId::new("SYNTH-ALWAYS").expect("valid identifier"),
+        VenueId::new("SYNTH-AUCT").expect("valid identifier"),
+        VenueId::new("SYNTH-DST").expect("valid identifier"),
     ]
 }

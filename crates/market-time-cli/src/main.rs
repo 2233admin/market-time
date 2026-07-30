@@ -9,9 +9,9 @@
 //! nanoseconds, and no surface here may imply that it does.
 
 use market_time_board::{BoardView, ClockDiscipline, NowMarker};
-use market_time_core::ids::VenueId;
-use market_time_core::instant::{Interval, UtcInstant};
-use market_time_core::query::TimelineSegment;
+use market_time_core::TimelineSegment;
+use market_time_core::VenueId;
+use market_time_core::{Interval, UtcInstant};
 use market_time_core::{PhaseOutcome, Ruleset, resolve_phase, resolve_timeline};
 use market_time_data::load_ruleset;
 use std::path::PathBuf;
@@ -82,7 +82,7 @@ fn run(args: &[String]) -> Result<String, String> {
 }
 
 fn phase_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result<String, String> {
-    let venues = options.venues(ruleset);
+    let venues = options.venues(ruleset)?;
     let mut out = String::new();
 
     for venue in venues {
@@ -174,9 +174,9 @@ fn timeline_command(
 ) -> Result<String, String> {
     let venue = options
         .venue
-        .clone()
-        .map(VenueId::new)
-        .ok_or_else(|| "--venue <id> is required for a timeline".to_owned())?;
+        .as_deref()
+        .ok_or_else(|| "--venue <id> is required for a timeline".to_owned())
+        .and_then(|value| VenueId::new(value).map_err(|error| error.to_string()))?;
 
     let interval = options.window(now.instant)?;
     let timeline = resolve_timeline(interval, &venue, ruleset);
@@ -256,10 +256,17 @@ impl Options {
         Ok(options)
     }
 
-    fn venues(&self, ruleset: &Ruleset) -> Vec<VenueId> {
+    /// The venues to answer for: the one that was named, or every venue in the dataset.
+    ///
+    /// # Errors
+    ///
+    /// Returns the identifier error when `--venue` was blank.
+    fn venues(&self, ruleset: &Ruleset) -> Result<Vec<VenueId>, String> {
         match &self.venue {
-            Some(venue) => vec![VenueId::new(venue)],
-            None => ruleset.venues(),
+            Some(venue) => VenueId::new(venue)
+                .map(|venue| vec![venue])
+                .map_err(|error| error.to_string()),
+            None => Ok(ruleset.venues()),
         }
     }
 

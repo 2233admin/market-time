@@ -22,7 +22,7 @@
 #![warn(missing_docs, clippy::pedantic)]
 
 use hifitime::{Epoch, TimeScale, Unit};
-use market_time_core::instant::UtcInstant;
+use market_time_core::UtcInstant;
 use std::fmt;
 
 /// A time scale an input instant may be labelled with.

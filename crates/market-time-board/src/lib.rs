@@ -24,9 +24,9 @@
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use market_time_core::instant::{Interval, UtcInstant};
-use market_time_core::phase::Phase;
-use market_time_core::query::{Timeline, TimelineSegment};
+use market_time_core::Phase;
+use market_time_core::{Interval, UtcInstant};
+use market_time_core::{Timeline, TimelineSegment};
 use std::fmt::Write as _;
 
 /// How well the host's own clock is disciplined.

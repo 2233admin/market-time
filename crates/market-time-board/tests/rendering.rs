@@ -1,9 +1,9 @@
 //! What the board must never do to an answer.
 
 use market_time_board::{BoardView, ClockDiscipline, NowMarker, glyph, render};
-use market_time_core::ids::VenueId;
-use market_time_core::instant::{Interval, UtcInstant};
-use market_time_core::phase::Phase;
+use market_time_core::Phase;
+use market_time_core::VenueId;
+use market_time_core::{Interval, UtcInstant};
 use market_time_core::{PhaseOutcome, Ruleset, resolve_timeline};
 use market_time_data::load_ruleset;
 use std::path::PathBuf;
@@ -136,7 +136,11 @@ fn the_board_draws_only_what_the_core_returned() {
     )
     .expect("valid interval");
 
-    let timeline = resolve_timeline(interval, &VenueId::new("SYNTH-ABSENT"), &ruleset);
+    let timeline = resolve_timeline(
+        interval,
+        &VenueId::new("SYNTH-ABSENT").expect("valid identifier"),
+        &ruleset,
+    );
     assert!(timeline.segments.iter().all(|segment| segment.is_unknown()));
 
     let board = BoardView {
@@ -155,7 +159,11 @@ fn the_board_draws_only_what_the_core_returned() {
 fn a_phase_answer_and_the_board_agree() {
     let ruleset = ruleset();
     let at = instant("2026-07-30T04:00:00Z");
-    let outcome = market_time_core::resolve_phase(at, &VenueId::new("SYNTH-AUCT"), &ruleset);
+    let outcome = market_time_core::resolve_phase(
+        at,
+        &VenueId::new("SYNTH-AUCT").expect("valid identifier"),
+        &ruleset,
+    );
     let PhaseOutcome::Known(answer) = outcome else {
         panic!("the fixture covers this instant");
     };

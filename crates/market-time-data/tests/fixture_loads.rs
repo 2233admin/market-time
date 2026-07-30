@@ -1,7 +1,7 @@
 //! The shipped fixture must load, and a dataset that breaks the rules must not.
 
-use market_time_core::ids::VenueId;
-use market_time_core::instant::UtcInstant;
+use market_time_core::UtcInstant;
+use market_time_core::VenueId;
 use market_time_core::{PhaseOutcome, resolve_phase};
 use market_time_data::{LoadError, load_ruleset, parse_ruleset};
 use std::path::PathBuf;
@@ -22,7 +22,7 @@ fn the_shipped_fixture_loads_and_answers() {
 
     let outcome = resolve_phase(
         instant("2026-07-30T02:00:00Z"),
-        &VenueId::new("SYNTH-AUCT"),
+        &VenueId::new("SYNTH-AUCT").expect("valid identifier"),
         &ruleset,
     );
     assert_eq!(
@@ -111,7 +111,7 @@ fn an_unknown_outcome_survives_the_round_trip() {
     let ruleset = load_ruleset(&fixture_path()).expect("fixture loads");
     let outcome = resolve_phase(
         instant("2030-01-01T00:00:00Z"),
-        &VenueId::new("SYNTH-AUCT"),
+        &VenueId::new("SYNTH-AUCT").expect("valid identifier"),
         &ruleset,
     );
     assert!(matches!(outcome, PhaseOutcome::Unknown(_)));

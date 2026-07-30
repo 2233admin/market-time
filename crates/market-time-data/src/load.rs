@@ -9,15 +9,15 @@ use crate::format::{
     UncertaintyRecord, VenueRecord,
 };
 use jiff::civil::{Date, Time, Weekday};
-use market_time_core::coverage::CoverageRange;
-use market_time_core::event::{EventKind, EventRule};
-use market_time_core::evidence::{DerivationNote, EvidenceRef};
-use market_time_core::ids::{DatasetRevisionId, IanaZoneId, VenueId};
-use market_time_core::instant::{Interval, UtcInstant};
-use market_time_core::phase::Phase;
-use market_time_core::rule::{CivilDaySchedule, DateRange, Rule, RuleKind};
-use market_time_core::ruleset::{DatasetRevision, Ruleset, VenueRuleset};
-use market_time_core::uncertainty::Uncertainty;
+use market_time_core::CoverageRange;
+use market_time_core::Phase;
+use market_time_core::Uncertainty;
+use market_time_core::{CivilDaySchedule, DateRange, Rule, RuleKind};
+use market_time_core::{DatasetRevision, Ruleset, VenueRuleset};
+use market_time_core::{DatasetRevisionId, IanaZoneId, IdentifierError, VenueId};
+use market_time_core::{DerivationNote, EvidenceRef};
+use market_time_core::{EventKind, EventRule};
+use market_time_core::{Interval, UtcInstant};
 use std::fmt;
 use std::path::Path;
 
@@ -50,8 +50,12 @@ pub fn parse_ruleset(text: &str) -> Result<Ruleset, LoadError> {
         .iter()
         .map(|record| {
             Ok(DatasetRevision {
-                id: DatasetRevisionId::new(&record.id),
-                supersedes: record.supersedes.as_deref().map(DatasetRevisionId::new),
+                id: identifier(DatasetRevisionId::new(&record.id))?,
+                supersedes: record
+                    .supersedes
+                    .as_deref()
+                    .map(|value| identifier(DatasetRevisionId::new(value)))
+                    .transpose()?,
                 iana_tzdb_version: record.iana_tzdb_version.clone(),
                 assembled_at: instant(&record.assembled_at)?,
             })
@@ -77,8 +81,8 @@ fn venue_ruleset(record: &VenueRecord) -> Result<VenueRuleset, LoadError> {
     );
 
     Ok(VenueRuleset {
-        venue: VenueId::new(&record.venue),
-        home_zone: IanaZoneId::new(&record.home_zone),
+        venue: identifier(VenueId::new(&record.venue))?,
+        home_zone: identifier(IanaZoneId::new(&record.home_zone))?,
         coverage,
         rules: record
             .rules
@@ -103,7 +107,7 @@ fn venue_ruleset(record: &VenueRecord) -> Result<VenueRuleset, LoadError> {
                     applies: date_range(&event.applies)?,
                     uncertainty: uncertainty(&event.uncertainty),
                     evidence: evidence(&event.evidence)?,
-                    revision: DatasetRevisionId::new(&event.revision),
+                    revision: identifier(DatasetRevisionId::new(&event.revision))?,
                 })
             })
             .collect::<Result<Vec<_>, LoadError>>()?,
@@ -135,7 +139,7 @@ fn rule(record: &RuleRecord) -> Result<Rule, LoadError> {
             .map(DerivationNote::new)
             .transpose()
             .map_err(|source| LoadError::Invalid(source.to_string()))?,
-        revision: DatasetRevisionId::new(&record.revision),
+        revision: identifier(DatasetRevisionId::new(&record.revision))?,
     })
 }
 
@@ -174,7 +178,7 @@ fn uncertainty(record: &UncertaintyRecord) -> Uncertainty {
             seconds,
             published_as,
         } => Uncertainty::PublishedBound {
-            nanos: i128::from(*seconds) * market_time_core::instant::NANOS_PER_SECOND,
+            nanos: i128::from(*seconds) * market_time_core::NANOS_PER_SECOND,
             published_as: published_as.clone(),
         },
         UncertaintyRecord::ProcessStart { process } => Uncertainty::ProcessStart {
@@ -200,6 +204,12 @@ fn evidence(record: &EvidenceRecord) -> Result<EvidenceRef, LoadError> {
 fn date_range(record: &DateRangeRecord) -> Result<DateRange, LoadError> {
     DateRange::new(date(&record.start)?, date(&record.end)?)
         .map_err(|source| LoadError::Invalid(source.to_string()))
+}
+
+/// Turns an identifier rejection into a load error, so a blank id in a dataset fails the
+/// load rather than travelling on as provenance that names nothing.
+fn identifier<T>(result: Result<T, IdentifierError>) -> Result<T, LoadError> {
+    result.map_err(|error| LoadError::Invalid(error.to_string()))
 }
 
 fn instant(text: &str) -> Result<UtcInstant, LoadError> {

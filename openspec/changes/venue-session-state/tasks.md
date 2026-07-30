@@ -26,6 +26,11 @@ absorbed:
   assert them are the operator's to run against their own dataset. What is proven now is that
   the engine is correct on data shaped like theirs.
 
+Adopted after merging the parallel implementation on main (6782ffc): private core modules
+with an explicit re-export surface, identifier validation that rejects a blank id where it
+enters, and CLI integration tests that check the shell does not lose the answer on the way
+out. 68 tests now.
+
 Still open beyond that: `evidence` as its own CLI command (5.9), evidence reachable from a
 rendered board segment (6.17), and the polish group.
 

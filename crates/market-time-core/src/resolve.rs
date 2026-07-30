@@ -31,7 +31,7 @@ use jiff::tz::{AmbiguousOffset, TimeZone};
 /// jiff's range is far outside any venue's declared coverage, so the query it belongs to
 /// is answered as unknown regardless.
 #[must_use]
-pub fn civil_datetime(zone: &TimeZone, at: UtcInstant) -> DateTime {
+pub(crate) fn civil_datetime(zone: &TimeZone, at: UtcInstant) -> DateTime {
     let timestamp =
         Timestamp::from_nanosecond(at.as_nanos_since_unix_epoch()).unwrap_or_else(|_| {
             if at.as_nanos_since_unix_epoch() < 0 {

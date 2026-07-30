@@ -21,24 +21,34 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
-pub mod coverage;
-pub mod event;
-pub mod evidence;
-pub mod ids;
-pub mod instant;
-pub mod phase;
-pub mod query;
-pub mod resolve;
-pub mod rule;
-pub mod ruleset;
+// Modules are private and the public surface is the re-export list below. Consumers
+// name a type, never a path through this crate's internals — so moving a type between
+// modules is not a breaking change, and nothing outside can reach a helper that was
+// never meant to be part of the contract.
+mod coverage;
+mod event;
+mod evidence;
+mod ids;
+mod instant;
+mod phase;
+mod query;
+mod resolve;
+mod rule;
+mod ruleset;
+mod uncertainty;
+
 pub mod tzdata;
-pub mod uncertainty;
 
 pub use coverage::{CoverageGap, CoverageRange};
-pub use ids::{DatasetRevisionId, IanaZoneId, VenueId};
-pub use instant::{Interval, UtcInstant};
+pub use event::{EventKind, EventOccurrence, EventRule};
+pub use evidence::{DerivationNote, EvidenceError, EvidenceRef};
+pub use ids::{DatasetRevisionId, IanaZoneId, IdentifierError, VenueId};
+pub use instant::{Interval, IntervalError, NANOS_PER_SECOND, UtcInstant};
 pub use phase::Phase;
-pub use query::{PhaseAnswer, PhaseOutcome, Timeline, TimelineSegment, VenueOutcome};
+pub use query::{
+    PhaseAnswer, PhaseBoundary, PhaseOutcome, Timeline, TimelineSegment, VenueOutcome,
+};
 pub use resolve::{resolve_phase, resolve_phases, resolve_timeline};
+pub use rule::{CivilDaySchedule, DateRange, Rule, RuleError, RuleKind};
 pub use ruleset::{DatasetRevision, Ruleset, RulesetError, VenueRuleset};
 pub use uncertainty::Uncertainty;
