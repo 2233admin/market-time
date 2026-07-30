@@ -49,7 +49,7 @@ If a requirement can only be justified as "project X needs it", it does not belo
 
 ## Governance
 
-`.specify/memory/constitution.md` is the ratified constitution and it wins over habit,
+[`CONSTITUTION.md`](CONSTITUTION.md) is the ratified constitution and it wins over habit,
 runbooks, and convenience. Read it before designing anything. Current version is recorded in
 its footer.
 
@@ -68,16 +68,34 @@ work around a principle; amend it or comply.
 
 ## Workflow
 
-Work flows through spec-kit. Skills live in `.agents/skills/`.
+Work flows through [OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.6.0. Spec material is
+committed under `openspec/`; the agent skills and slash commands that drive it are generated,
+not committed. Run once per clone:
 
 ```
-/speckit-specify → /speckit-plan → /speckit-tasks → /speckit-implement
+npx @fission-ai/openspec@1.6.0 init --tools claude,codex
 ```
 
-`.specify/feature.json` points at the active feature directory. Constitution Check in the
-plan template gates on the principles above and must pass before Phase 0 research and again
-after Phase 1 design. A violation carried forward is recorded in the plan's Complexity
-Tracking table with the rejected simpler alternative — never left silent.
+Then:
+
+```
+/opsx:propose → /opsx:apply → /opsx:archive
+```
+
+Layout:
+
+- `openspec/changes/<change>/proposal.md` — why, what changes, which capabilities
+- `openspec/changes/<change>/design.md` — technical decisions and trade-offs
+- `openspec/changes/<change>/tasks.md` — the work, in order
+- `openspec/changes/<change>/specs/<capability>/spec.md` — requirement deltas
+- `openspec/specs/<capability>/spec.md` — current truth, written by archiving a change
+
+The constitution gates design. Every principle above must be checked before the work starts and
+again after the design settles. A violation carried forward is recorded in `design.md` under
+Risks / Trade-offs with the rejected simpler alternative — never left silent.
+
+Deep reference material for a slice (research, data model, contracts, quickstart) lives in
+`docs/<slice>/` rather than in the change folder, because it outlives the change.
 
 ## Data sourcing rules
 

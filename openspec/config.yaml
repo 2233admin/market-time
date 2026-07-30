@@ -1,0 +1,30 @@
+schema: spec-driven
+
+context: |
+  Mark Time answers what trading phase a venue is in at a given instant, with the evidence
+  behind the answer and honest uncertainty around it.
+
+  Stack: Rust 2024 (MSRV pinned), Cargo workspace. `jiff` with `tzdb-bundle-always` for civil
+  time and zones; `hifitime` for the time-scale bridge. Tests are `cargo test` with a permanent
+  golden-vector corpus.
+
+  Crates: `market-time-core` is pure — no I/O, no network, no clock reads. `market-time-scales`
+  holds the one time-scale seam. `market-time-data` owns all I/O. `market-time-cli` and
+  `market-time-board` are thin shells with no domain logic.
+
+  Governance: CONSTITUTION.md is ratified and binding. Five principles; Evidence-Backed Rules
+  (I) and Test-First with Golden Vectors (V) are non-negotiable. Check every change against it.
+
+  Hard rules: no venue dataset is ever committed (see DATA-LICENSING.md; CI enforces it);
+  outside declared coverage the answer is an explicit unknown, never an extrapolation; derived
+  is never presented as observed; dataset revisions are immutable.
+
+  Reference material for a slice lives in docs/<slice>/, not in the change folder.
+
+rules:
+  design:
+    - Record the Constitution Check result gate by gate, and put any violation carried forward
+      under Risks / Trade-offs with the rejected simpler alternative.
+  tasks:
+    - Tests come first and must fail before implementation. A golden vector is never deleted to
+      make a build pass.

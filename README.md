@@ -36,11 +36,16 @@ as data.
 
 ## Status
 
-Pre-alpha. No code has been released yet. This repository currently contains only
-spec-kit workflow scaffolding (`.specify/`) and the ratified project constitution. Work
-proceeds through the spec-kit flow: `/speckit-specify` → `/speckit-plan` →
-`/speckit-tasks` → `/speckit-implement`. The first planned slice covers SSE, NYSE, and
-Binance.
+Pre-alpha. No code has been released yet. The repository carries the ratified constitution, a
+Cargo workspace whose crates are still empty, and the specification of the first delivery slice —
+venue session state for SSE, NYSE, and Binance — in
+[`openspec/changes/venue-session-state/`](openspec/changes/venue-session-state/). Supporting
+research, the data model, and the interface contracts are in
+[`docs/venue-session-state/`](docs/venue-session-state/).
+
+Work proceeds through [OpenSpec](https://github.com/Fission-AI/OpenSpec): a change proposes
+requirement deltas, the deltas get implemented, and archiving the change folds them into
+`openspec/specs/` as current truth.
 
 ## Principles
 
@@ -63,8 +68,8 @@ constrain how consumers may trust its output:
   an edit in place. Every build reports the revisions it runs against, so a past answer can
   be replayed against the rule set that was actually in force when it was given.
 
-See [`.specify/memory/constitution.md`](.specify/memory/constitution.md) for the full
-text, including Principles IV and V and the governance rules.
+See [`CONSTITUTION.md`](CONSTITUTION.md) for the full text, including Principles IV and V and
+the governance rules.
 
 ## License
 
