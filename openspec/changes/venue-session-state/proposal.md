@@ -33,6 +33,13 @@ phases).
   the same answer, and every answer names the revisions that produced it.
 - A multi-venue view that answers all tracked venues at one instant, where one venue being
   outside coverage does not suppress the others.
+- An interval query returning the ordered, gap-free phase timeline for a venue, and a board
+  that lays those timelines out on a shared axis. The board's shape follows the convention
+  established by global trading-hours boards — one row per market, phases laid out across a
+  24-hour axis, a marker on the present instant — and then carries evidence and uncertainty
+  through to the surface, which is the part those boards do not do. Conventional boards are a
+  reference for *what to display* and never a source for *what is true*; nothing is sourced from
+  one (see `AGENTS.md`, Data sourcing rules).
 
 The repository ships no venue data. All three launch venues forbid commercial redistribution of
 their published schedules, so schedules are fetched at run time by the operator under the
@@ -52,6 +59,9 @@ operator's own relationship with each venue (see `DATA-LICENSING.md`). CI enforc
   holidays and shortened sessions over the weekly schedule.
 - `dataset-reproducibility`: identified dataset revisions, declared coverage, and deterministic
   answers.
+- `board-timeline`: the timeline answer an interval query returns, and what the board must do
+  with it — viewer-zone labelling, an honest now marker, unknown that cannot be mistaken for
+  closed, and evidence reachable from any segment.
 
 ### Modified Capabilities
 

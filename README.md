@@ -43,6 +43,15 @@ venue session state for SSE, NYSE, and Binance — in
 research, the data model, and the interface contracts are in
 [`docs/venue-session-state/`](docs/venue-session-state/).
 
+The board that slice ships is a timeline: one row per venue, that venue's phases laid out across
+the day on a shared axis, a marker on the instant you are looking at. That is the shape global
+trading-hours boards already established. What it adds is the layer they leave out — every
+segment reaches its source document, and an out-of-coverage stretch reads as "not known" rather
+than being quietly drawn as closed. Coverage beyond the three launch venues is specified
+separately in
+[`openspec/changes/global-market-coverage/`](openspec/changes/global-market-coverage/) and is
+deliberately not part of the first slice.
+
 Work proceeds through [OpenSpec](https://github.com/Fission-AI/OpenSpec): a change proposes
 requirement deltas, the deltas get implemented, and archiving the change folds them into
 `openspec/specs/` as current truth.

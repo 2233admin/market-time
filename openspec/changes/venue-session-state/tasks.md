@@ -160,6 +160,21 @@ without voiding the rest.
 - [ ] 6.8 [US3] Render uncertainty in `crates/market-time-board/src/uncertainty_view.rs`. Governing rule from spec.md: if a display cannot express an honest answer, **the display changes, not the answer** (T060)
 - [ ] 6.9 [US3] Render the "as of" line in `crates/market-time-board/src/header.rs` carrying the host clock discipline bound (depends on T055) (T061)
 
+### Timeline board (capability `board-timeline`)
+
+The board is a timeline, not a row of status words: one row per venue, phases laid out across the
+queried interval on a shared axis, with a marker on the instant being viewed. Conventional global
+trading-hours boards establish that shape; the evidence and uncertainty layer is ours.
+
+- [ ] 6.10 [P] [US3] Timeline contract test in `crates/market-time-core/tests/contract/timeline.rs`: `resolve_timeline(venue, interval)` returns segments tiling the interval with no gaps and no overlaps, including a venue whose day holds more than one trading block
+- [ ] 6.11 [P] [US3] Partial-coverage timeline test in `crates/market-time-core/tests/contract/timeline_coverage.rs`: an interval crossing the coverage edge returns phase segments up to the boundary and unknown segments beyond it, rather than an error
+- [ ] 6.12 [P] [US3] Axis-zone invariance test in `crates/market-time-board/tests/axis_zone.rs`: relabelling the axis in another zone leaves every segment on the same absolute instants
+- [ ] 6.13 [US3] Implement `resolve_timeline` in `crates/market-time-core/src/resolve.rs` returning an ordered segment sequence over an interval, each segment carrying evidence and uncertainty (depends on 2.11 / T017)
+- [ ] 6.14 [US3] Render the axis and venue rows in `crates/market-time-board/src/timeline.rs` — segment position and width come from the core's answer; the board holds no schedule of its own
+- [ ] 6.15 [US3] Render the viewer-zone selector in `crates/market-time-board/src/axis.rs` as pure relabelling: request and answer stay UTC
+- [ ] 6.16 [US3] Render out-of-coverage stretches in `crates/market-time-board/src/timeline.rs` as unknown, distinct from closed at a glance, and render process-start boundaries with their spread rather than as a hard edge (depends on 6.8 / T060)
+- [ ] 6.17 [US3] Make evidence reachable from any segment in `crates/market-time-board/src/evidence_view.rs`: source document, retrieval date, effective date, and published-or-derived, per SC-008
+
 **Checkpoint**: all three user stories independently functional.
 
 ---

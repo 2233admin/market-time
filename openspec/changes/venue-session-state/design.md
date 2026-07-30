@@ -64,6 +64,15 @@ covering publication granularity, venue-published bounds (Binance publishes ±15
 settlement — a bound handed to us, not estimated), and process-start character (NYSE opens
 security by security; 09:30 starts that process rather than marking a market-wide transition).
 
+**The board is a timeline, not a status list.** One row per venue, that venue's phases laid out
+across the queried interval on a shared axis, a marker on the instant being viewed, and the
+viewer's zone applied as axis labelling only. That shape is the convention global trading-hours
+boards already established, and matching it is deliberate: be legible as one of those boards
+first, then carry the evidence and uncertainty layer through to the surface, which is the part
+they do not do. It costs one core capability those boards do not need — `resolve_timeline` over
+an interval rather than a point — which the phase timeline type already supports. Conventional
+boards are a reference for what to display and never a source for what is true.
+
 **Reproducibility mitigation (constitution gate G4), required not preferred.** `jiff` exposes no
 runtime tzdata version string and its default Unix behaviour reads the unpinned OS zoneinfo,
 which would break reproducibility silently. The build enables `tzdb-bundle-always` and records
