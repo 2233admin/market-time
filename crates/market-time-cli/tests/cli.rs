@@ -342,3 +342,70 @@ fn an_unusable_format_is_refused() {
         stderr(&output)
     );
 }
+
+#[test]
+fn a_wall_clock_time_can_be_read_in_a_zone() {
+    let output = run(&[
+        "phase",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-DST",
+        "--at",
+        "2026-07-15T09:30:00",
+        "--at-zone",
+        "America/New_York",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("continuous_trading"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn a_wall_clock_time_that_occurs_twice_is_refused_with_both_candidates() {
+    // 2026-11-01: New York clocks go back at 02:00 local.
+    let output = run(&[
+        "phase",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-DST",
+        "--at",
+        "2026-11-01T01:30:00",
+        "--at-zone",
+        "America/New_York",
+    ]);
+    assert!(!output.status.success(), "a coin flip is not an answer");
+
+    let message = stderr(&output);
+    assert!(message.contains("occurs twice"), "{message}");
+    assert!(message.contains("2026-11-01T05:30:00Z"), "{message}");
+    assert!(message.contains("2026-11-01T06:30:00Z"), "{message}");
+}
+
+#[test]
+fn a_wall_clock_time_that_never_happens_is_refused() {
+    // 2026-03-08: New York clocks jump 02:00 -> 03:00.
+    let output = run(&[
+        "phase",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-DST",
+        "--at",
+        "2026-03-08T02:30:00",
+        "--at-zone",
+        "America/New_York",
+    ]);
+    assert!(!output.status.success());
+
+    let message = stderr(&output);
+    assert!(message.contains("does not exist"), "{message}");
+    assert!(
+        message.contains("No instant bears that reading"),
+        "{message}"
+    );
+}

@@ -44,6 +44,13 @@ recorded in `docs/venue-session-state/quickstart-results.md`, the README has a u
 section, the post-implementation Constitution Check is in `design.md`, and the workspace is
 at 0.1.0 with a `CHANGELOG.md`.
 
+`CivilInstant` (2.3) landed in `crates/market-time-core/src/civil.rs` rather than
+`instant.rs` — a zone-bound wall-clock reading whose `to_utc` returns Unambiguous,
+Ambiguous, or Nonexistent, with no method that picks one for you. The resolver's own
+conversion now goes through the same code, so the daylight-saving question has one
+implementation rather than two. The CLI exposes it as `--at-zone`: a wall-clock time that
+occurs twice or never is refused with both candidate instants.
+
 T040-T042 were corrected rather than completed — see the note above task 4.15. They asked
 for datasets to be committed under `data/`, which `DATA-LICENSING.md` forbids and CI blocks.
 What remains is the operator's decision about how real schedules are obtained, and the fetch
@@ -75,7 +82,7 @@ adapter that decision needs.
 ### Core types — pure, no I/O, no clock
 
 - [x] 2.2 [P] Implement `UtcInstant` in `crates/market-time-core/src/instant.rs` with nanosecond resolution and **no `now()` constructor of any kind** — only `from_nanos_since_unix_epoch`. Principle IV and contracts/core-api.md (T008)
-- [ ] 2.3 [P] Implement `CivilInstant` (zone-bound wall clock) in `crates/market-time-core/src/instant.rs`, and the civil↔absolute conversion returning `Unambiguous` / `Ambiguous` / `Nonexistent` — never a silent guess (FR-014, D1) (T009)
+- [x] 2.3 [P] Implement `CivilInstant` (zone-bound wall clock) in `crates/market-time-core/src/instant.rs`, and the civil↔absolute conversion returning `Unambiguous` / `Ambiguous` / `Nonexistent` — never a silent guess (FR-014, D1) (T009)
 - [x] 2.4 [P] Implement the closed `Phase` vocabulary in `crates/market-time-core/src/phase.rs`: closed, pre-open, opening auction, continuous trading, mid-day break, closing auction, post-close, non-trading interruption (FR-005, FR-006). No venue-specific variants are permitted (T010)
 - [x] 2.5 [P] Implement the closed `EventKind` vocabulary in `crates/market-time-core/src/event.rs`, deliberately separate from `Phase` so the two cannot be conflated (FR-007) (T011)
 - [x] 2.6 [P] Implement `Uncertainty` in `crates/market-time-core/src/uncertainty.rs` covering publication granularity, venue-published bounds, and process-start character; reused identically by phase boundaries and events (FR-011, FR-011a, FR-011b) (T012)

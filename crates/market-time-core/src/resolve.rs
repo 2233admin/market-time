@@ -338,16 +338,15 @@ fn to_utc_at(
 /// which case it is the uncertainty that must be carried, because it is wider than any
 /// publication granularity.
 fn to_utc(zone: &TimeZone, dt: DateTime) -> (UtcInstant, Option<Uncertainty>) {
-    let ambiguous = zone.to_ambiguous_timestamp(dt);
-    match ambiguous.offset() {
-        AmbiguousOffset::Unambiguous { offset } => (instant_of(offset, dt), None),
+    match zone.to_ambiguous_timestamp(dt).offset() {
+        AmbiguousOffset::Unambiguous { offset } => (crate::civil::instant_of(offset, dt), None),
         AmbiguousOffset::Fold { before, after } => {
-            let earlier = instant_of(before, dt);
-            let later = instant_of(after, dt);
-            let (earlier, later) = if earlier <= later {
-                (earlier, later)
+            let first = crate::civil::instant_of(before, dt);
+            let second = crate::civil::instant_of(after, dt);
+            let (earlier, later) = if first <= second {
+                (first, second)
             } else {
-                (later, earlier)
+                (second, first)
             };
             (
                 earlier,
@@ -355,8 +354,8 @@ fn to_utc(zone: &TimeZone, dt: DateTime) -> (UtcInstant, Option<Uncertainty>) {
             )
         }
         AmbiguousOffset::Gap { before, after } => {
-            let as_if_before_shift = instant_of(before, dt);
-            let as_if_after_shift = instant_of(after, dt);
+            let as_if_before_shift = crate::civil::instant_of(before, dt);
+            let as_if_after_shift = crate::civil::instant_of(after, dt);
             (
                 as_if_before_shift.max(as_if_after_shift),
                 Some(Uncertainty::NonexistentLocalTime {
@@ -366,13 +365,6 @@ fn to_utc(zone: &TimeZone, dt: DateTime) -> (UtcInstant, Option<Uncertainty>) {
             )
         }
     }
-}
-
-fn instant_of(offset: jiff::tz::Offset, dt: DateTime) -> UtcInstant {
-    offset.to_timestamp(dt).map_or_else(
-        |_| UtcInstant::from_nanos_since_unix_epoch(0),
-        |timestamp| UtcInstant::from_nanos_since_unix_epoch(timestamp.as_nanosecond()),
-    )
 }
 
 fn events_in(rules: &[EventRule], zone: &TimeZone, interval: Interval) -> Vec<EventOccurrence> {

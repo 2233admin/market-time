@@ -11,8 +11,11 @@
 use market_time_board::{BoardView, ClockDiscipline, NowMarker, SegmentDetail};
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
+use market_time_core::{
+    CivilInstant, CivilResolution, IanaZoneId, Phase, PhaseOutcome, Ruleset, resolve_phase,
+    resolve_timeline,
+};
 use market_time_core::{Interval, UtcInstant};
-use market_time_core::{Phase, PhaseOutcome, Ruleset, resolve_phase, resolve_timeline};
 use market_time_data::load_ruleset;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -36,6 +39,10 @@ NOTES
 
   --at defaults to now. This shell reads the clock; the core never does, and the answer
   always carries how well that instant is known.
+
+  --at-zone reads --at as a wall-clock time in that zone instead of as UTC. Twice a year a
+  wall-clock time names two instants or none; those are refused with both candidates rather
+  than resolved by a coin flip. Name the instant you mean with a UTC --at.
 
   --format json is the shape for machines. Uncertainty and unknown are fields there, not
   prose: an unknown answer has \"phase\": null and a stated reason, never \"closed\".
@@ -412,6 +419,7 @@ struct Options {
     dataset: Option<PathBuf>,
     venue: Option<String>,
     at: Option<String>,
+    at_zone: Option<String>,
     zone: String,
     hours: i64,
     columns: usize,
@@ -424,6 +432,7 @@ impl Options {
             dataset: None,
             venue: None,
             at: None,
+            at_zone: None,
             zone: "UTC".to_owned(),
             hours: 24,
             columns: 72,
@@ -442,6 +451,7 @@ impl Options {
                 "--dataset" => options.dataset = Some(PathBuf::from(value()?)),
                 "--venue" => options.venue = Some(value()?),
                 "--at" => options.at = Some(value()?),
+                "--at-zone" => options.at_zone = Some(value()?),
                 "--zone" => options.zone = value()?,
                 "--hours" => {
                     options.hours = value()?
@@ -518,6 +528,7 @@ impl Options {
                     },
                 })
             }
+            Some(text) if self.at_zone.is_some() => self.resolve_civil(text),
             Some(text) => {
                 let timestamp: jiff::Timestamp = text
                     .parse()
@@ -529,6 +540,42 @@ impl Options {
                     },
                 })
             }
+        }
+    }
+
+    /// Reads `--at` as a wall-clock time in `--at-zone`.
+    ///
+    /// A wall-clock time that occurs twice, or that does not occur at all, is refused with
+    /// both candidate instants. The alternative would be for this shell to pick one and
+    /// say nothing, which is precisely the silent guess the whole product exists to avoid.
+    fn resolve_civil(&self, text: &str) -> Result<NowMarker, String> {
+        let zone = self
+            .at_zone
+            .as_deref()
+            .ok_or_else(|| "--at-zone is required to read --at as a wall-clock time".to_owned())?;
+        let zone_id = IanaZoneId::new(zone).map_err(|error| error.to_string())?;
+        let civil = CivilInstant::parse(zone_id, text).map_err(|error| error.to_string())?;
+
+        match civil.to_utc() {
+            CivilResolution::Unambiguous(instant) => Ok(NowMarker {
+                instant,
+                discipline: ClockDiscipline::Given {
+                    source: format!("--at {text} read in {zone}"),
+                },
+            }),
+            CivilResolution::Ambiguous { earlier, later } => Err(format!(
+                "{text} occurs twice in {zone}: {} and {}. Which one is meant is yours to say — pass one of them as a UTC --at",
+                show(earlier),
+                show(later)
+            )),
+            CivilResolution::Nonexistent {
+                as_if_before_shift,
+                as_if_after_shift,
+            } => Err(format!(
+                "{text} does not exist in {zone}: the clocks jumped from {} to {}. No instant bears that reading",
+                show(as_if_after_shift),
+                show(as_if_before_shift)
+            )),
         }
     }
 
