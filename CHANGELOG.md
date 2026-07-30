@@ -47,6 +47,10 @@ ships here, now or ever.
   and `RevisionAssembly`, which transcribes evidence from the retrieval — URL, fetch time,
   terms, and a sha256 digest of the bytes — and validates through the loader before writing
   anything. No HTTP client is vendored: the transport is the operator's.
+- **An SSE adapter** — `adapters::sse`, the first venue adapter: a parser for the session
+  table as SSE publishes it, a mapping from the venue's own session names to the shared
+  vocabulary, and a refusal to assign any interval the document leaves unlabelled without a
+  ruling that carries its reasoning. It holds no session times.
 - A synthetic three-venue fixture at
   `crates/market-time-data/fixtures/synthetic-venues.json`, so the tool can be run and
   verified without data anyone is forbidden to redistribute.
@@ -67,6 +71,6 @@ in `docs/venue-session-state/quickstart-results.md`.
 
 - Real SSE, NYSE, or Binance schedules, and therefore any claim of accuracy about a real
   venue. The engine is verified on data shaped like theirs.
-- A venue adapter: reading a real venue's published page into rules. The interface around
-  it is here; the reading is the operator's, and which venue goes first is their decision.
+- An NYSE adapter, and the first-party sourcing of its session table and early-close
+  footnote. Same shape as the SSE adapter; it needs NYSE's terms accepted first.
 - Prices, quotes, trades, or volumes. Mark Time answers schedule questions.

@@ -60,9 +60,16 @@ credentials and whose agreement with the venue are operator questions; `Revision
 transcribes evidence from the retrieval, including a sha256 digest of the bytes, and
 validates through the loader before writing anything.
 
-What remains is 4.17 and the 3.x source verification: reading one real venue's publication
-into rules. That needs the venue chosen and its terms accepted, which is an operator
-decision, not a code one.
+4.17 is done, with SSE as the first venue. `market_time_data::adapters::sse` is a parser
+and a label mapping and contains **no session times**: SSE's Trading Rules require the
+Exchange's permission for use or publication (D6a), so the schedule stays in the operator's
+fetched document. `day_schedule` refuses to fill an interval the published table leaves
+unassigned — including the lunch break, which the venue publishes by omission rather than by
+name — and requires a `GapRuling` carrying reasoning. The two real SSE intervals were settled
+from source in D4b and D4c; they are passed in at assembly time rather than compiled in.
+
+What remains is 3.4 and 3.5: sourcing NYSE's session table and early-close footnote
+first-party. Same shape as SSE, different venue, and it needs NYSE's terms accepted first.
 
 ## 1. Setup (Shared Infrastructure) (spec-kit Phase 1)
 
@@ -168,7 +175,7 @@ with each venue, and the tooling helps them assemble a revision from what they f
 
 - [x] 4.15 [US1] Implement a fetch adapter interface in `crates/market-time-data/src/fetch.rs`: given a registered source (URL, terms recorded at registration, expected format), retrieve the document, record `fetched_at`, and hand back bytes plus provenance. No venue-specific parsing here; this is the seam network access lives behind (replaces T040)
 - [x] 4.16 [US1] Implement revision assembly in `crates/market-time-data/src/revision.rs`: turn fetched documents plus per-rule evidence into an immutable dataset revision with a `supersedes` chain and a declared coverage range, written to a path the operator chooses and this repository never tracks (replaces T041)
-- [ ] 4.17 [US1] Implement a venue adapter for one venue end to end as the proof the interface is usable — parsing that venue's published schedule into rules with evidence, including the **variable** recurrence case if the venue has one (Binance funding is 8-hourly by default, 4-hourly for a named contract subset, hourly under volatility, with reversion thresholds that themselves changed over time; a fixed "every 8 hours" field would be wrong — research D5). Which venue goes first is an operator decision, not a code one (replaces T042)
+- [x] 4.17 [US1] Implement a venue adapter for one venue end to end as the proof the interface is usable — parsing that venue's published schedule into rules with evidence, including the **variable** recurrence case if the venue has one (Binance funding is 8-hourly by default, 4-hourly for a named contract subset, hourly under volatility, with reversion thresholds that themselves changed over time; a fixed "every 8 hours" field would be wrong — research D5). Which venue goes first is an operator decision, not a code one (replaces T042)
 - [x] 4.18 [US1] Document the operator path in `README.md`: register a source and its terms, fetch, assemble a revision, point `--dataset` at it. The tool is a client; the operator is responsible for their own compliance
 
 **Checkpoint**: User Story 1 fully functional and independently testable. **This is the MVP.**
