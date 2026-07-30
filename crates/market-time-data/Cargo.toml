@@ -10,3 +10,5 @@ authors.workspace = true
 
 [dependencies]
 market-time-core = { path = "../market-time-core" }
+serde.workspace = true
+serde_json.workspace = true

@@ -21,4 +21,25 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
+mod coverage;
+mod evidence;
+mod ids;
+mod instant;
+mod phase;
+mod resolve;
+mod ruleset;
+mod uncertainty;
+
 pub mod tzdata;
+
+pub use coverage::{CoverageError, CoverageRange};
+pub use evidence::{EvidenceError, EvidenceRef};
+pub use ids::{DatasetRevisionId, IanaZoneId, IdentifierError, VenueId};
+pub use instant::UtcInstant;
+pub use phase::{
+    Phase, PhaseBoundary, PhaseParseError, PhaseSegment, PhaseSegmentError, PhaseTimeline,
+    PhaseTimelineError,
+};
+pub use resolve::{CoverageGap, PhaseAnswer, PhaseOutcome, resolve_phase};
+pub use ruleset::{DatasetRevision, DatasetRevisionError, Ruleset, RulesetError, VenueRuleset};
+pub use uncertainty::{BoundaryCharacter, Uncertainty};

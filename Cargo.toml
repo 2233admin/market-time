@@ -38,3 +38,7 @@ hifitime = "4.3"
 # `tzdb-bundle-always`; naming it here is what makes the release identifier
 # reportable rather than hand-transcribed (Principle III).
 jiff-tzdb = "0.1"
+
+# Stable rule-file decoding and machine-readable shell output.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -58,20 +58,20 @@ Cargo workspace per plan.md Structure Decision:
 
 ### Core types — pure, no I/O, no clock
 
-- [ ] T008 [P] Implement `UtcInstant` in `crates/market-time-core/src/instant.rs` with nanosecond resolution and **no `now()` constructor of any kind** — only `from_nanos_since_unix_epoch`. Principle IV and contracts/core-api.md
+- [x] T008 [P] Implement `UtcInstant` in `crates/market-time-core/src/instant.rs` with nanosecond resolution and **no `now()` constructor of any kind** — only `from_nanos_since_unix_epoch`. Principle IV and contracts/core-api.md
 - [ ] T009 [P] Implement `CivilInstant` (zone-bound wall clock) in `crates/market-time-core/src/instant.rs`, and the civil↔absolute conversion returning `Unambiguous` / `Ambiguous` / `Nonexistent` — never a silent guess (FR-014, D1)
-- [ ] T010 [P] Implement the closed `Phase` vocabulary in `crates/market-time-core/src/phase.rs`: closed, pre-open, opening auction, continuous trading, mid-day break, closing auction, post-close, non-trading interruption (FR-005, FR-006). No venue-specific variants are permitted
+- [x] T010 [P] Implement the closed `Phase` vocabulary in `crates/market-time-core/src/phase.rs`: closed, pre-open, opening auction, continuous trading, mid-day break, closing auction, post-close, non-trading interruption (FR-005, FR-006). No venue-specific variants are permitted
 - [ ] T011 [P] Implement the closed `EventKind` vocabulary in `crates/market-time-core/src/event.rs`, deliberately separate from `Phase` so the two cannot be conflated (FR-007)
-- [ ] T012 [P] Implement `Uncertainty` in `crates/market-time-core/src/uncertainty.rs` covering publication granularity, venue-published bounds, and process-start character; reused identically by phase boundaries and events (FR-011, FR-011a, FR-011b)
-- [ ] T013 [P] Implement `Evidence` in `crates/market-time-core/src/evidence.rs` with `source_url`, `fetched_at`, `effective_from`, optional `source_updated_at`, and paired-validated `is_derived` / `derivation_reasoning` (FR-009, FR-010)
-- [ ] T014 [P] Implement `Coverage` in `crates/market-time-core/src/coverage.rs` as a half-open declared range (FR-018)
+- [x] T012 [P] Implement `Uncertainty` in `crates/market-time-core/src/uncertainty.rs` covering publication granularity, venue-published bounds, and process-start character; reused identically by phase boundaries and events (FR-011, FR-011a, FR-011b)
+- [x] T013 [P] Implement `Evidence` in `crates/market-time-core/src/evidence.rs` with `source_url`, `fetched_at`, `effective_from`, optional `source_updated_at`, and paired-validated `is_derived` / `derivation_reasoning` (FR-009, FR-010)
+- [x] T014 [P] Implement `Coverage` in `crates/market-time-core/src/coverage.rs` as a half-open declared range (FR-018)
 - [ ] T015 Implement `Rule` and its five kinds in `crates/market-time-core/src/rule.rs`: weekly pattern, holiday session, shortened session, announced change, event recurrence. Precedence is a fixed evaluation order on kind, not a stored priority field (depends on T013, T014)
 - [ ] T016 Implement `DatasetRevision` in `crates/market-time-core/src/ruleset.rs` as an immutable full snapshot with a `supersedes` chain (Principle III, FR-016) (depends on T015)
 
 ### The invariant that must be structural, not conventional
 
-- [ ] T017 Implement `PhaseTimeline` in `crates/market-time-core/src/phase.rs` as a smart-constructed type whose constructor verifies contiguity (`segment[i].end == segment[i+1].start`) and full span coverage, returning a typed error rather than building. A gap MUST become a construction failure, never a silently wrong answer (FR-008) (depends on T007, T010)
-- [ ] T018 Implement `PhaseOutcome` in `crates/market-time-core/src/query.rs` with `Known(..)` and `Unknown(CoverageGap)` as **data variants, not `Result::Err`** — an unknown is an answer, distinct from closed and distinct from an error (FR-002)
+- [x] T017 Implement `PhaseTimeline` in `crates/market-time-core/src/phase.rs` as a smart-constructed type whose constructor verifies contiguity (`segment[i].end == segment[i+1].start`) and full span coverage, returning a typed error rather than building. A gap MUST become a construction failure, never a silently wrong answer (FR-008) (depends on T007, T010)
+- [x] T018 Implement `PhaseOutcome` in `crates/market-time-core/src/query.rs` with `Known(..)` and `Unknown(CoverageGap)` as **data variants, not `Result::Err`** — an unknown is an answer, distinct from closed and distinct from an error (FR-002)
 
 ### Guards
 
@@ -118,10 +118,10 @@ explicit unknown for the fourth.
 
 ### Implementation for User Story 1
 
-- [ ] T032 [US1] Implement `resolve_phase` in `crates/market-time-core/src/resolve.rs`, taking `at: UtcInstant` and a `Ruleset`, returning `PhaseOutcome` (FR-001, FR-003, FR-004) (depends on T017, T018)
+- [x] T032 [US1] Implement `resolve_phase` in `crates/market-time-core/src/resolve.rs`, taking `at: UtcInstant` and a `Ruleset`, returning `PhaseOutcome` (FR-001, FR-003, FR-004) (depends on T017, T018)
 - [ ] T033 [US1] Implement rule precedence in `crates/market-time-core/src/resolve.rs`: shortened session and holiday override the weekly pattern (FR-015) (depends on T015, T024)
-- [ ] T034 [US1] Implement coverage enforcement in `crates/market-time-core/src/coverage.rs` so an out-of-range query returns `Unknown(CoverageGap)` and never extrapolates (FR-002, FR-018) (depends on T025)
-- [ ] T035 [US1] Implement `Ruleset::from_parts` in `crates/market-time-core/src/ruleset.rs` accepting **only materialized in-memory values** — never a path, URL, or handle — so the query path stays total and the core stays I/O-free (contracts/core-api.md)
+- [x] T034 [US1] Implement coverage enforcement in `crates/market-time-core/src/coverage.rs` so an out-of-range query returns `Unknown(CoverageGap)` and never extrapolates (FR-002, FR-018) (depends on T025)
+- [x] T035 [US1] Implement `Ruleset::from_parts` in `crates/market-time-core/src/ruleset.rs` accepting **only materialized in-memory values** — never a path, URL, or handle — so the query path stays total and the core stays I/O-free (contracts/core-api.md)
 - [ ] T036 [P] [US1] Implement `RawScaledInstant` and the leap-second-aware conversion to UTC in `crates/market-time-scales/src/lib.rs` using hifitime. **This is the D1a seam and it exists in exactly one place**; document in-file that everything downstream is leap-second-naive
 - [ ] T037 [P] [US1] Implement dataset revision loading in `crates/market-time-data/src/revision.rs`, supporting both vendored and fetch-at-run-time sources per each source's licensing tier (research D6)
 - [ ] T038 [US1] Implement the CLI `phase` command in `crates/market-time-cli/src/main.rs` per contracts/cli.md, including exit codes distinguishing usage error (2), DST-ambiguous input (3), and data-load failure (4) from the always-0 Known/Unknown outcome
@@ -152,8 +152,8 @@ to a source a person can open and check.
 
 ### Implementation for User Story 2
 
-- [ ] T048 [US2] Attach evidence to every `PhaseAnswer` in `crates/market-time-core/src/query.rs` (FR-009)
-- [ ] T049 [US2] Attach the producing dataset revisions to every answer in `crates/market-time-core/src/query.rs` (FR-016)
+- [x] T048 [US2] Attach evidence to every `PhaseAnswer` in `crates/market-time-core/src/query.rs` (FR-009)
+- [x] T049 [US2] Attach the producing dataset revisions to every answer in `crates/market-time-core/src/query.rs` (FR-016)
 - [ ] T050 [US2] Populate uncertainty from source publication precision during rule construction in `crates/market-time-core/src/rule.rs` (FR-011)
 - [ ] T051 [US2] Implement the CLI `evidence` command in `crates/market-time-cli/src/main.rs` per contracts/cli.md, with machine-readable output
 - [ ] T052 [US2] Ensure uncertainty and unknown survive CLI serialization in `crates/market-time-cli/src/output.rs` — they MUST NOT be dropped for tidiness (contracts/cli.md)

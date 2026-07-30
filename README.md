@@ -36,11 +36,38 @@ as data.
 
 ## Status
 
-Pre-alpha. No code has been released yet. This repository currently contains only
-spec-kit workflow scaffolding (`.specify/`) and the ratified project constitution. Work
-proceeds through the spec-kit flow: `/speckit-specify` → `/speckit-plan` →
-`/speckit-tasks` → `/speckit-implement`. The first planned slice covers SSE, NYSE, and
-Binance.
+Pre-alpha. The first explicit-UTC vertical slice now runs end to end:
+
+`operator JSON ruleset → market-time-data validation → PhaseTimeline invariant →
+resolve_phase() → CLI JSON/text output`.
+
+It supports nanosecond-represented RFC 3339 UTC queries, half-open phase boundaries,
+explicit out-of-coverage `unknown`, evidence, uncertainty, immutable dataset revision
+attribution, source-terms registration, and the compiled IANA tzdata revision. Civil-time
+input, `--at now`, rule precedence, real SSE/NYSE/Binance adapters, multi-venue queries,
+events, and the board remain planned work. `--at now` is deliberately rejected until host
+clock-discipline bounds can be surfaced honestly.
+
+### Run the vertical slice
+
+The checked-in ruleset is synthetic and contains no venue data:
+
+```powershell
+cargo run -p market-time-cli -- phase `
+  --ruleset examples/synthetic-ruleset.json `
+  --venue X-MT-DEMO `
+  --at 1970-01-01T00:00:00.000000010Z `
+  --format json
+```
+
+The answer is `continuous_trading`, owns the exact 10ns boundary under the half-open
+convention, and carries its evidence, uncertainty, `synthetic-r1`, and the compiled IANA
+tzdata revision. Querying `...000000030Z`, the exclusive coverage end, succeeds with an
+explicit `unknown`.
+
+Work continues through the spec-kit flow: `/speckit-specify` → `/speckit-plan` →
+`/speckit-tasks` → `/speckit-implement`. Real venue data is fetched by operators at runtime
+under their own source relationships and is never redistributed from this repository.
 
 ## Principles
 

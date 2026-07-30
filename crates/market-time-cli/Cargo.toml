@@ -13,5 +13,7 @@ name = "market-time"
 path = "src/main.rs"
 
 [dependencies]
+jiff.workspace = true
 market-time-core = { path = "../market-time-core" }
 market-time-data = { path = "../market-time-data" }
+serde_json.workspace = true

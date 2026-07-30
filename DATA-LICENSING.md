@@ -79,6 +79,12 @@ of Mark Time are responsible for satisfying those upstream terms themselves —
 the same way using an HTTP client does not grant rights to whatever a server
 happens to return.
 
+The checked-in `examples/synthetic-ruleset.json` is authored test material, not a
+calendar, schedule, or factual claim about any real venue. Its `X-MT-DEMO` identifier and
+nanosecond-scale intervals exist only to exercise the loader, invariant, resolver, and CLI
+pipeline. It is covered by the repository's code license and does not create an exception
+to the rule that no venue data ships here.
+
 ## Scope of this document
 
 This is policy, not a legal opinion, and it is not a substitute for reading a

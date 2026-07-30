@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "source_url": "https://raw.githubusercontent.com/2233admin/market-time/main/examples/synthetic-ruleset.json",
+      "terms_url": "https://raw.githubusercontent.com/2233admin/market-time/main/LICENSE-MIT",
+      "terms_checked_at_ns": 1,
+      "redistribution": "Synthetic demonstration authored for Market Time; covered by the repository's MIT OR Apache-2.0 license"
+    }
+  ],
+  "revisions": [
+    {
+      "id": "synthetic-r1",
+      "dataset_kind": "synthetic_demo",
+      "created_at_ns": 2,
+      "source_description": "Synthetic fixture for the Market Time end-to-end pipeline",
+      "supersedes": null
+    }
+  ],
+  "venues": [
+    {
+      "id": "X-MT-DEMO",
+      "home_zone": "UTC",
+      "coverage": {
+        "valid_from_ns": 0,
+        "valid_until_ns": 30
+      },
+      "segments": [
+        {
+          "phase": "closed",
+          "start": {
+            "instant_ns": 0,
+            "uncertainty": {
+              "granularity_ns": null,
+              "published_bound_ns": null,
+              "boundary_character": "instantaneous",
+              "process_spread_ns": null,
+              "is_derived": true
+            }
+          },
+          "end": {
+            "instant_ns": 10,
+            "uncertainty": {
+              "granularity_ns": null,
+              "published_bound_ns": null,
+              "boundary_character": "instantaneous",
+              "process_spread_ns": null,
+              "is_derived": true
+            }
+          },
+          "evidence": [
+            {
+              "source_url": "https://raw.githubusercontent.com/2233admin/market-time/main/examples/synthetic-ruleset.json",
+              "fetched_at_ns": 1,
+              "effective_from_ns": 0,
+              "source_updated_at_ns": null,
+              "is_derived": true,
+              "derivation_reasoning": "Synthetic data used only to exercise the pipeline"
+            }
+          ],
+          "dataset_revisions": [
+            "synthetic-r1"
+          ]
+        },
+        {
+          "phase": "continuous_trading",
+          "start": {
+            "instant_ns": 10,
+            "uncertainty": {
+              "granularity_ns": null,
+              "published_bound_ns": null,
+              "boundary_character": "instantaneous",
+              "process_spread_ns": null,
+              "is_derived": true
+            }
+          },
+          "end": {
+            "instant_ns": 30,
+            "uncertainty": {
+              "granularity_ns": null,
+              "published_bound_ns": null,
+              "boundary_character": "instantaneous",
+              "process_spread_ns": null,
+              "is_derived": true
+            }
+          },
+          "evidence": [
+            {
+              "source_url": "https://raw.githubusercontent.com/2233admin/market-time/main/examples/synthetic-ruleset.json",
+              "fetched_at_ns": 1,
+              "effective_from_ns": 0,
+              "source_updated_at_ns": null,
+              "is_derived": true,
+              "derivation_reasoning": "Synthetic data used only to exercise the pipeline"
+            }
+          ],
+          "dataset_revisions": [
+            "synthetic-r1"
+          ]
+        }
+      ]
+    }
+  ]
+}
