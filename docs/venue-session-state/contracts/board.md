@@ -138,7 +138,15 @@ draws one, it MUST make that unmistakable:
 `None` exactly when every contributing member is itself unknown for that stretch. The
 board MUST NOT render that `None` as "exact" or drop it silently; it renders as its own
 stated absence ("no schedule known for this stretch"), same as everywhere else in this
-product that a `None` uncertainty appears.
+product that a `None` uncertainty appears — and that statement is a different claim from
+the hatch a plain `Unknown` state already draws: the hatch says the state is not known,
+the `None` uncertainty says precision is not a meaningful question to ask of the stretch at
+all, because nothing at all is known about it. A hover title alone does not satisfy this:
+the absence MUST also be visible in the default, un-hovered view — a modest marker on the
+affected row plus a line in the section's own key or footnote — because the hover text a
+person never triggers is, for that person, the same as it not existing. The marker MAY be
+small and MUST NOT be drawn, nor the footnote line printed, for a render where no segment's
+uncertainty is `None`.
 
 ## Violations
 
@@ -150,5 +158,7 @@ to an exact-looking clock when discipline data is unavailable; renders an unknow
 instead of taking it fresh from each `resolve_phases` call; draws a band or overlap row
 without labelling it derived; draws a band's or overlap's state in the same glyph or colour
 vocabulary as a `Phase`; renders an `Unknown` band or overlap stretch with anything other
-than the venue section's own not-known hatch; or renders an empty `BandSection` as anything
-other than exactly the board this contract describes with no bands at all.
+than the venue section's own not-known hatch; renders an empty `BandSection` as anything
+other than exactly the board this contract describes with no bands at all; or leaves a
+`None` `BandSegment`/`OverlapSegment` uncertainty stated only in a hover title, with nothing
+in the default, un-hovered view to show it.

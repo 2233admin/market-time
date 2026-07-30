@@ -189,10 +189,23 @@ pub struct BoardView {
 pub fn render(view: &BoardView) -> String {
     let zone = TimeZone::get(&view.axis_zone).unwrap_or(TimeZone::UTC);
     let columns = view.columns.max(12);
+    // Every row's `[` track shares one column down the whole page — venue rows and the
+    // derived band/overlap rows beneath them alike — so this width has to be the widest
+    // label in the *entire* board, not just the venue rows sitting above the fold. Leaving
+    // the derived labels out here (as a version of this once did) let `label_width` and
+    // `render_band_section`'s own recomputation disagree whenever one set of labels was
+    // shorter than the other, shifting that section's tracks out of column.
     let label_width = view
         .rows
         .iter()
         .map(|row| row.label.len())
+        .chain(view.bands.bands.iter().map(|band| band_label(band).len()))
+        .chain(
+            view.bands
+                .overlaps
+                .iter()
+                .map(|overlap| overlap_label(overlap).len()),
+        )
         .max()
         .unwrap_or(6)
         .max(6);
@@ -243,7 +256,7 @@ pub fn render(view: &BoardView) -> String {
 
     if !view.bands.is_empty() {
         let _ = writeln!(out);
-        out.push_str(&render_band_section(view, columns));
+        out.push_str(&render_band_section(view, columns, label_width));
     }
 
     let sources = render_sources(&view.rows);
@@ -742,7 +755,15 @@ fn overlap_status(overlap: &BandOverlap, now: Option<&NowMarker>) -> String {
 /// venue row above it. The glyphs come from [`band_glyph`]/[`overlap_glyph`], never
 /// [`glyph`], for the same reason. Only called when [`BandSection::is_empty`] is false, so
 /// a zero-band view never reaches this function at all.
-fn render_band_section(view: &BoardView, columns: usize) -> String {
+///
+/// `venue_label_width` is [`render`]'s own `label_width`, computed from the venue rows
+/// above. The `[` track for every row in a rendered board shares one axis down the page —
+/// that is the whole point of drawing a `now` marker at all — so this section's track must
+/// start at the same column the venue section's did, not at whatever column its own
+/// (typically shorter, "(derived)"-suffixed) labels would pick on their own. Taking the
+/// wider of the two keeps that column aligned regardless of which set of labels happens to
+/// be longer.
+fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usize) -> String {
     let mut out = String::new();
     let bands = &view.bands.bands;
     let overlaps = &view.bands.overlaps;
@@ -753,7 +774,8 @@ fn render_band_section(view: &BoardView, columns: usize) -> String {
         .chain(overlaps.iter().map(|overlap| overlap_label(overlap).len()))
         .max()
         .unwrap_or(6)
-        .max(6);
+        .max(6)
+        .max(venue_label_width);
 
     let _ = writeln!(out, "DERIVED BANDS (never a venue's published schedule)");
     for band in bands {

@@ -732,3 +732,30 @@ fn an_unknown_band_id_fails_loudly() {
         stderr(&output)
     );
 }
+
+#[test]
+fn a_band_named_twice_is_rejected_by_name_rather_than_as_same_band_overlap() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--band",
+        "band-continuous-markets",
+        "--band",
+        "band-continuous-markets",
+    ]);
+    assert!(
+        !output.status.success(),
+        "a duplicated --band flag must not silently derive the same band twice"
+    );
+    let message = stderr(&output);
+    assert!(
+        message.contains("named more than once"),
+        "the message should name the actual mistake — a repeated flag — rather than the \
+         confusing downstream answer \"cannot be overlapped with itself\": {message}"
+    );
+    assert!(
+        message.contains("band-continuous-markets"),
+        "and should say which value was repeated: {message}"
+    );
+}

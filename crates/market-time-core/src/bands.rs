@@ -349,18 +349,60 @@ fn segment_at(timeline: &Timeline, at: UtcInstant) -> &TimelineSegment {
         .expect("tiles_interval was checked before this lookup")
 }
 
-/// The wider of two optional uncertainties, treating `None` as "nothing known" rather than
-/// as an unbounded width.
+/// The wider of two optional uncertainties, treating `None` as "nothing folded in yet"
+/// rather than as an unbounded width — the accumulator identity for a fold that starts
+/// empty.
 ///
-/// This is the counterpart to [`Uncertainty::widest`] for slices that may have nothing to
-/// report at all: an all-unknown slice has no numeric or venue-published uncertainty to
-/// fold in, and `None` here means exactly that — never "wider than everything", the way an
-/// unbounded [`Uncertainty`] variant reads.
+/// This is **only** for [`derive_band`]'s running fold over a slice's members, one at a
+/// time: `known_uncertainty` starts as `None` meaning "no member examined so far has been
+/// known," and each known member's `Some(uncertainty)` is folded in with
+/// [`Uncertainty::widest`]. There, `None` on one side is never itself a formed answer — it
+/// is the absence of one, so the other side's value simply carries forward.
+///
+/// Do not reach for this anywhere that combines two *already-derived* segments (an
+/// overlap's two contributing bands, or two segments being merged into one). There, a
+/// `None` is not "not examined yet" — it is the formed, documented answer "every
+/// contributor here is unknown," and treating it as absent would let a neighbour's precise
+/// value narrow it. Use [`widen_formed`] at those sites instead; see its doc comment for
+/// why the two must not be confused.
 fn widen_optional(a: Option<Uncertainty>, b: Option<Uncertainty>) -> Option<Uncertainty> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.widest(b)),
         (Some(value), None) | (None, Some(value)) => Some(value),
         (None, None) => None,
+    }
+}
+
+/// Combines the uncertainties of two already-formed segments — an overlap's two
+/// contributing band segments, or two segments [`merge_adjacent`] is folding into one.
+///
+/// Unlike [`widen_optional`], a `None` here is never "nothing seen yet": it is
+/// [`BandSegment::uncertainty`]'s documented meaning, "every contributing member is itself
+/// unknown for this stretch," which is *wider* than any stated number, not narrower. So a
+/// `None` on either side must make the combination `None` too — the combined answer is
+/// never more precise than its least precise input:
+///
+/// - `(Some(a), Some(b))` — both sides carry a formed, numeric answer, so the combination
+///   is the widest of the two, exactly like [`widen_optional`];
+/// - anything else (`(None, Some(_))`, `(Some(_), None)`, `(None, None)`) — at least one
+///   side has nothing at all known, so the pair has nothing at all known either. A slice
+///   where band X is `None` (nothing at all known) and band Y is `Some(1min)` (known to
+///   the minute) must not report `Some(1min)` for the pair: nothing is known about X
+///   there, so the honest answer for the pair is `None`, not Y's number.
+///
+/// [`merge_adjacent`] is generic over [`BandSegment`] and [`OverlapSegment`], but this
+/// distinction only bites for the latter: `OverlapSegment::agrees_with` compares state
+/// only, so two adjacent `Unknown` slices can disagree on `None` vs. `Some` and still be
+/// asked to merge — exactly where the old `widen_optional` call used to narrow one away.
+/// `BandSegment::agrees_with` additionally requires equal `venues_unknown`, and
+/// `uncertainty` is `None` if and only if `venues_unknown` names every member, so two
+/// `BandSegment`s that agree on `venues_unknown` already agree on `None`-ness too — this
+/// function and `widen_optional` behave identically there, and the merge path for bands is
+/// unaffected by using this helper everywhere.
+fn widen_formed(a: Option<Uncertainty>, b: Option<Uncertainty>) -> Option<Uncertainty> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.widest(b)),
+        _ => None,
     }
 }
 
@@ -424,12 +466,18 @@ impl MergeableSegment for OverlapSegment {
 }
 
 /// Merges adjacent segments that [`MergeableSegment::agrees_with`] their predecessor,
-/// widening uncertainty across every merge with [`widen_optional`].
+/// widening uncertainty across every merge with [`widen_formed`].
 ///
 /// Shared by `merge_band_segments` and `merge_overlap_segments`. A pair only merges when
 /// they are also adjacent — `previous`'s interval ends exactly where the next one starts —
 /// so this never merges across a gap, even if two non-adjacent segments happen to agree on
 /// everything `agrees_with` checks.
+///
+/// Uses [`widen_formed`], not [`widen_optional`]: both segments being merged are already
+/// formed answers (see `widen_formed`'s doc comment for why that distinction matters), and
+/// for `OverlapSegment` in particular, `agrees_with` compares state only, so two adjacent
+/// `Unknown` slices can reach this merge with one side `None` and the other `Some` — the
+/// merged result must stay `None`, not narrow to the `Some` side.
 fn merge_adjacent<T: MergeableSegment>(segments: Vec<T>) -> Vec<T> {
     let mut merged: Vec<T> = Vec::with_capacity(segments.len());
     for segment in segments {
@@ -437,7 +485,7 @@ fn merge_adjacent<T: MergeableSegment>(segments: Vec<T>) -> Vec<T> {
             && previous.interval().end == segment.interval().start
             && previous.agrees_with(&segment)
         {
-            let widened = widen_optional(previous.uncertainty(), segment.uncertainty());
+            let widened = widen_formed(previous.uncertainty(), segment.uncertainty());
             previous.extend_to(segment.interval().end);
             previous.set_uncertainty(widened);
             continue;
@@ -619,7 +667,12 @@ pub fn derive_overlap(a: &SessionBand, b: &SessionBand) -> Result<BandOverlap, B
             OverlapState::NotOverlapping
         };
 
-        let uncertainty = widen_optional(left.uncertainty.clone(), right.uncertainty.clone());
+        // `left` and `right` are already-formed `BandSegment`s, not an accumulator being
+        // built up one member at a time, so this widens with `widen_formed`: a `None` on
+        // either side means that band's segment has nothing at all known for this stretch,
+        // and the overlap must inherit that rather than reporting the other band's number
+        // (see `widen_formed`'s doc comment).
+        let uncertainty = widen_formed(left.uncertainty.clone(), right.uncertainty.clone());
 
         segments.push(OverlapSegment {
             interval: slice,
@@ -833,6 +886,115 @@ mod tests {
             merged.len(),
             2,
             "a gap between 10 and 20 must not be merged away"
+        );
+    }
+
+    #[test]
+    fn widen_formed_treats_none_as_the_formed_answer_not_as_nothing_seen_yet() {
+        // Unlike `widen_optional`, a lone `None` here is a documented answer in its own
+        // right ("every contributor is unknown"), so it must win over a `Some` neighbour
+        // rather than being treated as absent and falling back to it.
+        assert_eq!(widen_formed(None, None), None);
+        assert_eq!(widen_formed(None, Some(Uncertainty::minutes(1))), None);
+        assert_eq!(widen_formed(Some(Uncertainty::minutes(5)), None), None);
+    }
+
+    #[test]
+    fn widen_formed_picks_the_wider_of_two_known_values() {
+        let wide = widen_formed(
+            Some(Uncertainty::minutes(1)),
+            Some(Uncertainty::minutes(10)),
+        )
+        .expect("both sides known");
+        assert!(wide.is_at_least_as_wide_as(&Uncertainty::minutes(10)));
+    }
+
+    fn band_id(id: &str) -> BandId {
+        BandId::new(id).expect("valid identifier")
+    }
+
+    fn venue(id: &str) -> VenueId {
+        VenueId::new(id).expect("valid identifier")
+    }
+
+    fn derivation(reasoning: &str) -> DerivationNote {
+        DerivationNote::new(reasoning).expect("reasoning is present")
+    }
+
+    /// A single-segment `SessionBand`, built directly (bypassing `derive_band`) so a test
+    /// can hand `derive_overlap` exactly the already-formed segment it wants to combine,
+    /// including combinations `derive_band` itself would never produce.
+    fn single_segment_band(id: &str, seg: BandSegment) -> SessionBand {
+        let definition = BandDefinition::new(
+            band_id(id),
+            "Test Band",
+            vec![venue("SYNTH-TEST")],
+            derivation("synthetic band for the uncertainty-combining regression tests"),
+        )
+        .expect("valid definition");
+        SessionBand {
+            interval: seg.interval,
+            segments: vec![seg],
+            definition,
+        }
+    }
+
+    fn overlap_segment(
+        start: i64,
+        end: i64,
+        state: OverlapState,
+        uncertainty: Option<Uncertainty>,
+    ) -> OverlapSegment {
+        OverlapSegment {
+            interval: Interval::new(instant(start), instant(end)).expect("valid interval"),
+            state,
+            uncertainty,
+        }
+    }
+
+    #[test]
+    fn overlap_uncertainty_is_none_when_one_contributing_band_segment_has_nothing_known() {
+        // Band X: every member unknown here — nothing at all is known, the documented
+        // meaning of `None` (module docs, `BandSegment::uncertainty`).
+        let band_x = single_segment_band("band-x", segment(0, 10, BandState::Unknown, None));
+        // Band Y: known to the minute.
+        let band_y = single_segment_band(
+            "band-y",
+            segment(0, 10, BandState::Trading, Some(Uncertainty::minutes(1))),
+        );
+
+        let overlap = derive_overlap(&band_x, &band_y).expect("both bands share the interval");
+        assert_eq!(overlap.segments().len(), 1);
+        assert_eq!(
+            overlap.segments()[0].uncertainty,
+            None,
+            "nothing at all is known about band X here, so the overlap slice must not \
+             inherit band Y's precise uncertainty instead — a combined answer must never be \
+             more precise than its least precise input"
+        );
+    }
+
+    #[test]
+    fn adjacent_unknown_overlap_segments_with_mixed_uncertainty_merge_to_none() {
+        // Both slices are `Unknown`, so `OverlapSegment::agrees_with` (state only) says
+        // they merge — but one has nothing at all known and the other has a stated minute,
+        // so the merged slice must carry `None`, not silently adopt the `Some` side.
+        let segments = vec![
+            overlap_segment(0, 10, OverlapState::Unknown, None),
+            overlap_segment(10, 20, OverlapState::Unknown, Some(Uncertainty::minutes(1))),
+        ];
+        let merged = merge_overlap_segments(segments);
+        assert_eq!(
+            merged.len(),
+            1,
+            "both slices are Unknown, so they merge into one"
+        );
+        assert_eq!(merged[0].interval.start, instant(0));
+        assert_eq!(merged[0].interval.end, instant(20));
+        assert_eq!(
+            merged[0].uncertainty, None,
+            "one contributor has nothing at all known, so the merged slice must not \
+             narrow to the other contributor's precise uncertainty"
         );
     }
 }

@@ -543,3 +543,241 @@ fn the_svg_board_hatches_an_unknown_band_stretch_with_the_same_pattern() {
          inside the band section itself: {svg}"
     );
 }
+
+fn bracket_column(line: &str) -> usize {
+    line.find('[')
+        .unwrap_or_else(|| panic!("row has a `[` track: {line:?}"))
+}
+
+/// Asserts the first venue row and the first band row start their `[` track at the same
+/// column — the shared-axis promise `render`'s module docs make ("segment position ...
+/// come from ... a shared axis"), which only holds if both sections agree on one
+/// `label_width`.
+fn assert_track_columns_match(board: &BoardView, scenario: &str) {
+    let rendered = render(board);
+    let venue_line = rendered
+        .lines()
+        .find(|line| line.contains('['))
+        .unwrap_or_else(|| panic!("a venue row is drawn with a track: {rendered}"));
+    let band_line = rendered
+        .lines()
+        .find(|line| line.contains("(derived)"))
+        .unwrap_or_else(|| panic!("the band row is drawn: {rendered}"));
+
+    assert_eq!(
+        bracket_column(venue_line),
+        bracket_column(band_line),
+        "{scenario}: the band row's track must start at the same column as the venue \
+         rows' — venue={venue_line:?} band={band_line:?}"
+    );
+}
+
+/// The value of `name="..."` inside a single SVG element's markup, e.g. `attr(line,
+/// "y2")` for `y2="123.4"`.
+fn attr(element: &str, name: &str) -> f64 {
+    let needle = format!(r#"{name}=""#);
+    let start = element
+        .find(&needle)
+        .unwrap_or_else(|| panic!("{name} attribute present in {element:?}"))
+        + needle.len();
+    let rest = &element[start..];
+    let end = rest.find('"').expect("closing quote");
+    rest[..end]
+        .parse()
+        .unwrap_or_else(|_| panic!("{name} is numeric in {element:?}"))
+}
+
+/// The `<line>` element marking `now`: the one whose colour is the dedicated now-marker
+/// colour used nowhere else in the document, so there is exactly one match.
+fn now_line(svg: &str) -> &str {
+    let marker_at = svg
+        .find(r##"stroke="#f78166""##)
+        .expect("the now marker is drawn somewhere in the document");
+    let start = svg[..marker_at]
+        .rfind("<line")
+        .expect("the now marker's colour sits inside a <line> element");
+    let end = svg[start..]
+        .find("/>")
+        .map(|offset| start + offset)
+        .expect("the <line> element closes");
+    &svg[start..end]
+}
+
+#[test]
+fn the_now_line_reaches_through_the_derived_band_section_when_bands_are_present() {
+    // With no bands, the line's bottom endpoint is whatever it always was: the venue
+    // section's own bottom, a few pixels of margin past the last row.
+    let bandless = view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    let bandless_svg = market_time_board::render_svg(&bandless);
+    let bandless_bottom = attr(now_line(&bandless_svg), "y2");
+
+    // With bands attached, the same interval and the same venue rows draw a taller canvas
+    // — the now line must stretch down to cover the derived section too, not stop at the
+    // same y-coordinate as the bandless board above, which would leave it ending above the
+    // band/overlap rows the text renderer marks `now` on.
+    let banded = banded_view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    let banded_svg = market_time_board::render_svg(&banded);
+    let banded_bottom = attr(now_line(&banded_svg), "y2");
+
+    assert!(
+        banded_bottom > bandless_bottom,
+        "the now line must extend further down when a derived band section is drawn \
+         beneath the venue rows: bandless y2={bandless_bottom}, banded y2={banded_bottom}"
+    );
+
+    // And it must reach at least as far as the derived rows themselves — the last derived
+    // row's own track, identified by the dashed border `render_derived_row` draws only for
+    // band/overlap rows, never for a venue row.
+    let last_derived_track_y = banded_svg
+        .rfind(r#"stroke-dasharray="2,2""#)
+        .map(|marker_at| {
+            let start = banded_svg[..marker_at]
+                .rfind("<rect")
+                .expect("the dashed border sits inside a <rect> element");
+            attr(&banded_svg[start..marker_at], "y")
+        })
+        .expect("at least one derived row is drawn");
+
+    assert!(
+        banded_bottom >= last_derived_track_y,
+        "the now line must reach at least as far as the last derived row's own track: \
+         line y2={banded_bottom}, last derived row y={last_derived_track_y}"
+    );
+}
+
+#[test]
+fn band_and_venue_rows_share_one_track_column_whichever_labels_are_longer() {
+    let ruleset = ruleset();
+    let always = VenueId::new("SYNTH-ALWAYS").expect("valid identifier");
+
+    let single_member_band = |id: &str, name: &str| {
+        BandDefinition::new(
+            BandId::new(id).expect("valid identifier"),
+            name,
+            vec![always.clone()],
+            DerivationNote::new(
+                "single-member band for the track-column-alignment regression test",
+            )
+            .expect("non-empty"),
+        )
+        .expect("valid definition")
+    };
+
+    // Case 1: band labels ("b: B") are much shorter than the fixture's venue labels
+    // ("Synthetic Always-On Venue" and friends).
+    let mut short_labels_board = view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    let definition = single_member_band("b", "B");
+    let timelines = vec![resolve_timeline(
+        short_labels_board.interval,
+        &always,
+        &ruleset,
+    )];
+    let band = derive_band(&definition, &timelines).expect("the fixture's timeline derives");
+    short_labels_board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+    assert_track_columns_match(
+        &short_labels_board,
+        "band labels much shorter than venue labels",
+    );
+
+    // Case 2: band labels are much longer than the venue labels — shrink every venue label
+    // down to a single character so the band section's own labels dominate the max.
+    let mut long_labels_board = view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    for row in &mut long_labels_board.rows {
+        row.label = "V".to_owned();
+    }
+    let definition = single_member_band(
+        "band-a-very-long-descriptive-identifier",
+        "A Very Long Descriptive Display Name For This Derived Band",
+    );
+    let timelines = vec![resolve_timeline(
+        long_labels_board.interval,
+        &always,
+        &ruleset,
+    )];
+    let band = derive_band(&definition, &timelines).expect("the fixture's timeline derives");
+    long_labels_board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+    assert_track_columns_match(
+        &long_labels_board,
+        "band labels much longer than venue labels",
+    );
+}
+
+#[test]
+fn a_no_schedule_band_segment_is_marked_in_the_default_svg_view_not_only_in_hover_text() {
+    // Past every synthetic venue's declared coverage, same as
+    // `the_svg_board_hatches_an_unknown_band_stretch_with_the_same_pattern`: every member of
+    // both bands is unknown throughout, so `BandSegment::uncertainty` is `None` — nothing
+    // at all is known here, not merely "unknown state".
+    let no_schedule = banded_view("UTC", "2027-02-01T00:00:00Z", "2027-02-02T00:00:00Z", None);
+    let svg = market_time_board::render_svg(&no_schedule);
+
+    let heading_at = svg
+        .find("DERIVED SESSION BANDS")
+        .expect("the band section is drawn");
+
+    assert!(
+        svg[heading_at..].contains("<circle"),
+        "a segment with nothing at all known must carry a visible marker in the band \
+         section, not only a hover title: {svg}"
+    );
+    assert!(
+        svg.contains("no schedule known for this stretch"),
+        "the section states the absence in its own key/footnote, in the same wording the \
+         hover title already uses, not only inside a <title>: {svg}"
+    );
+
+    // The default view — never anything that could be misread as an exact answer.
+    assert!(
+        !svg.contains("no schedule known for this stretch — exact"),
+        "the footnote must never claim exactness for an absence: {svg}"
+    );
+
+    // A board over a fully in-coverage day, by contrast, has nothing to mark: every
+    // segment's uncertainty is `Some`, so neither the marker nor the footnote should
+    // appear at all — the absence-marker is not a permanent fixture of the section.
+    let all_known = banded_view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    let known_svg = market_time_board::render_svg(&all_known);
+    let known_heading_at = known_svg
+        .find("DERIVED SESSION BANDS")
+        .expect("the band section is drawn");
+
+    assert!(
+        !known_svg[known_heading_at..].contains("<circle"),
+        "a fully in-coverage day has nothing to mark as no-schedule: {known_svg}"
+    );
+    assert!(
+        !known_svg.contains("no schedule known for this stretch"),
+        "and must not print the footnote when it names nothing on the page: {known_svg}"
+    );
+}

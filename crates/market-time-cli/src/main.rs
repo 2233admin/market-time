@@ -818,10 +818,23 @@ impl Options {
     ///
     /// Returns a message when `--band` names an id blank, or one this dataset does not
     /// declare — the same "fail loudly" stance `required_venue` takes for an unknown
-    /// venue, rather than silently deriving fewer bands than were asked for.
+    /// venue, rather than silently deriving fewer bands than were asked for. Also returns a
+    /// message when the same `--band` value is given more than once: `derive_all` pairs
+    /// every selected band with every other one to compute overlaps, so a duplicate would
+    /// pair a band with itself and surface as `BandError::SameBand` — a confusing answer
+    /// for what is really a repeated flag, so it is rejected here instead, where the
+    /// message can name the actual mistake.
     fn select_bands(&self, definitions: &[BandDefinition]) -> Result<Vec<BandDefinition>, String> {
         if self.bands.is_empty() {
             return Ok(definitions.to_vec());
+        }
+
+        let mut seen: Vec<&str> = Vec::with_capacity(self.bands.len());
+        for requested in &self.bands {
+            if seen.contains(&requested.as_str()) {
+                return Err(format!("--band {requested:?} was named more than once"));
+            }
+            seen.push(requested);
         }
 
         self.bands
