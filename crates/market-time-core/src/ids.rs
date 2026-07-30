@@ -99,6 +99,15 @@ string_id!(
     "IANA zone id"
 );
 
+string_id!(
+    /// Identifies a derived session band, e.g. `"session-band-london"`.
+    ///
+    /// A band is never a venue: it names the *derived* grouping in
+    /// [`crate::BandDefinition`], not a rule with evidence of its own.
+    BandId,
+    "band id"
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

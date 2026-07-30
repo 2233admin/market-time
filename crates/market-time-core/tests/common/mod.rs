@@ -306,3 +306,171 @@ pub fn venue_ids() -> Vec<VenueId> {
         VenueId::new("SYNTH-DST").expect("valid identifier"),
     ]
 }
+
+// ------------------------------------------------------------- band fixtures (task 3)
+
+/// A minimal venue for [`bands`](../bands.rs) tests: UTC, no daylight saving, no auctions,
+/// trading every day of the week so a single calendar day is enough to exercise it. Trades
+/// 08:00-12:00Z.
+///
+/// Kept separate from `auction_venue`/`dst_venue`/`always_on_venue` and their zone and
+/// daylight-saving detail: the band-derivation tests want two venues whose trading windows
+/// touch and overlap in a way that is easy to state in UTC, not another DST case.
+///
+/// Coverage runs the whole day, unlike [`band_a_gap_venue`], which is the same schedule cut
+/// short.
+#[must_use]
+pub fn band_a_venue() -> VenueRuleset {
+    band_a_venue_with(
+        "SYNTH-BAND-A",
+        coverage("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"),
+    )
+}
+
+/// The same schedule as [`band_a_venue`], but with coverage ending at 09:00Z — inside its
+/// own trading window (08:00-12:00) and, crucially, *before* [`band_b_gap_venue`]'s own
+/// cutoff at 11:00Z. Pairing this with `band_b_gap_venue` gives a stretch (09:00-11:00) with
+/// exactly one member unknown, and a stretch (11:00 onward) where *every* member is
+/// unknown — the only combination that can make [`crate::BandSegment::uncertainty`] read
+/// `None`.
+#[must_use]
+pub fn band_a_gap_venue() -> VenueRuleset {
+    band_a_venue_with(
+        "SYNTH-BAND-A-GAP",
+        coverage("2026-01-01T00:00:00Z", "2026-01-01T09:00:00Z"),
+    )
+}
+
+fn band_a_venue_with(id: &str, coverage_range: CoverageRange) -> VenueRuleset {
+    let trading_day = schedule(vec![
+        (Time::midnight(), Phase::Closed),
+        (Time::constant(8, 0, 0, 0), Phase::ContinuousTrading),
+        (Time::constant(12, 0, 0, 0), Phase::Closed),
+    ]);
+
+    VenueRuleset {
+        venue: VenueId::new(id).expect("valid identifier"),
+        profile: VenueProfile {
+            display_name: Some("Synthetic Band Venue A".to_owned()),
+            location: Some("Global".to_owned()),
+            family: Some(AssetFamily::Equities),
+        },
+        home_zone: IanaZoneId::new("UTC").expect("valid identifier"),
+        coverage: coverage_range,
+        rules: vec![Rule {
+            kind: RuleKind::WeeklyPattern {
+                weekdays: vec![
+                    Weekday::Monday,
+                    Weekday::Tuesday,
+                    Weekday::Wednesday,
+                    Weekday::Thursday,
+                    Weekday::Friday,
+                    Weekday::Saturday,
+                    Weekday::Sunday,
+                ],
+            },
+            schedule: trading_day,
+            applies: dates(date(2026, 1, 1), date(2026, 1, 1)),
+            boundary_uncertainty: Uncertainty::minutes(1),
+            evidence: evidence("https://synthetic.test/band-a/trading-rules"),
+            derived: None,
+            revision: revision_id(),
+        }],
+        events: Vec::new(),
+        evidence: vec![evidence("https://synthetic.test/band-a/")],
+    }
+}
+
+/// A second minimal UTC venue, whose trading window (10:00-14:00Z) overlaps
+/// `band_a_venue`'s (08:00-12:00Z) rather than merely touching it: 08:00-10:00 is A alone,
+/// 10:00-12:00 is both, 12:00-14:00 is B alone. Its published boundary uncertainty
+/// (10 minutes) is wider than A's (1 minute), so a band or overlap covering the shared
+/// stretch must never be narrower than 10 minutes.
+///
+/// Coverage runs the whole day, unlike [`band_b_gap_venue`], which is the same schedule cut
+/// short to exercise task 3.3's out-of-coverage vector.
+#[must_use]
+pub fn band_b_venue() -> VenueRuleset {
+    band_b_venue_with(
+        "SYNTH-BAND-B",
+        coverage("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"),
+    )
+}
+
+/// The same schedule as [`band_b_venue`], but with coverage ending at 11:00Z — inside its
+/// own trading window and inside `band_a_venue`'s trading window too. A band or overlap
+/// derived across the two must go unknown for the stretch from 11:00Z onward, never
+/// narrowed to what `band_a_venue` alone is doing (task 3.3).
+#[must_use]
+pub fn band_b_gap_venue() -> VenueRuleset {
+    band_b_venue_with(
+        "SYNTH-BAND-B-GAP",
+        coverage("2026-01-01T00:00:00Z", "2026-01-01T11:00:00Z"),
+    )
+}
+
+fn band_b_venue_with(id: &str, coverage_range: CoverageRange) -> VenueRuleset {
+    let trading_day = schedule(vec![
+        (Time::midnight(), Phase::Closed),
+        (Time::constant(10, 0, 0, 0), Phase::ContinuousTrading),
+        (Time::constant(14, 0, 0, 0), Phase::Closed),
+    ]);
+
+    VenueRuleset {
+        venue: VenueId::new(id).expect("valid identifier"),
+        profile: VenueProfile {
+            display_name: Some("Synthetic Band Venue B".to_owned()),
+            location: Some("Global".to_owned()),
+            family: Some(AssetFamily::Equities),
+        },
+        home_zone: IanaZoneId::new("UTC").expect("valid identifier"),
+        coverage: coverage_range,
+        rules: vec![Rule {
+            kind: RuleKind::WeeklyPattern {
+                weekdays: vec![
+                    Weekday::Monday,
+                    Weekday::Tuesday,
+                    Weekday::Wednesday,
+                    Weekday::Thursday,
+                    Weekday::Friday,
+                    Weekday::Saturday,
+                    Weekday::Sunday,
+                ],
+            },
+            schedule: trading_day,
+            applies: dates(date(2026, 1, 1), date(2026, 1, 1)),
+            boundary_uncertainty: Uncertainty::minutes(10),
+            evidence: evidence("https://synthetic.test/band-b/trading-rules"),
+            derived: None,
+            revision: revision_id(),
+        }],
+        events: Vec::new(),
+        evidence: vec![evidence("https://synthetic.test/band-b/")],
+    }
+}
+
+/// A ruleset holding only the band-test venues, isolated from [`ruleset`] so that growing
+/// this fixture can never perturb `vectors.rs`'s golden vectors.
+///
+/// # Panics
+///
+/// Panics when the fixtures fail validation, which would itself mean the fixtures drifted.
+#[must_use]
+pub fn band_ruleset() -> Ruleset {
+    Ruleset::from_parts(
+        vec![revision()],
+        vec![
+            band_a_venue(),
+            band_a_gap_venue(),
+            band_b_venue(),
+            band_b_gap_venue(),
+        ],
+    )
+    .expect("band fixtures are a valid ruleset")
+}
+
+/// The full day the band fixtures are queried over: 2026-01-01T00:00:00Z, a Thursday.
+#[must_use]
+pub fn band_day() -> Interval {
+    interval("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+}

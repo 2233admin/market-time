@@ -25,6 +25,7 @@
 // name a type, never a path through this crate's internals — so moving a type between
 // modules is not a breaking change, and nothing outside can reach a helper that was
 // never meant to be part of the contract.
+mod bands;
 mod catalog;
 mod civil;
 mod coverage;
@@ -41,12 +42,16 @@ mod uncertainty;
 
 pub mod tzdata;
 
+pub use bands::{
+    BandDefinition, BandError, BandOverlap, BandSegment, BandState, OverlapSegment, OverlapState,
+    SessionBand, derive_band, derive_overlap,
+};
 pub use catalog::{AssetFamily, VenueProfile};
 pub use civil::{CivilError, CivilInstant, CivilResolution};
 pub use coverage::{CoverageGap, CoverageRange};
 pub use event::{EventKind, EventOccurrence, EventRule};
 pub use evidence::{DerivationNote, EvidenceError, EvidenceRef};
-pub use ids::{DatasetRevisionId, IanaZoneId, IdentifierError, VenueId};
+pub use ids::{BandId, DatasetRevisionId, IanaZoneId, IdentifierError, VenueId};
 pub use instant::{Interval, IntervalError, NANOS_PER_SECOND, UtcInstant};
 pub use phase::Phase;
 pub use query::{

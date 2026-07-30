@@ -18,6 +18,21 @@ hides whether the rest are closed or simply unknown.
 What is still open here is the part that needs venues: per-venue coverage declarations
 beyond the launch set, session segment roles, and the derived session bands.
 
+Tasks 3.1-3.3 landed too, ahead of 1.4 and section 2, because they turned out not to
+depend on either: `derive_band` and `derive_overlap` in `crates/market-time-core/src/bands.rs`
+take `&[Timeline]` directly, so they needed no new coverage plumbing and no segment-role
+field to exist first. A `SessionBand` cuts its members' timelines at every boundary and
+classifies each slice — unknown wins if any member is unknown there (task 3.3's vector,
+golden-tested in `tests/bands.rs`), otherwise trading wins if any member is trading, else
+not-trading — and folds `Option<Uncertainty>` over the *known* contributors, `None` only
+when every member is unknown for that slice. `derive_overlap` cuts two bands the same way;
+an unknown band always wins there too, never read as "not overlapping". Both carry a
+`DerivationNote` and are never presented as a published fact, per the spec. What is still
+open: band *definitions* are not yet loadable from a dataset — every band in the test suite
+is constructed by hand in the test itself — and nothing wires a band into `market-time-data`
+or a shell. That is next, once 1.4 and section 2 give it real per-venue coverage and segment
+roles to draw on.
+
 ## 1. Catalog
 
 - [x] 1.1 Define the venue catalog record — display name, location, home zone, asset-class
@@ -39,10 +54,10 @@ beyond the launch set, session segment roles, and the derived session bands.
 
 ## 3. Session bands
 
-- [ ] 3.1 Derive regional bands from constituent venue schedules in
+- [x] 3.1 Derive regional bands from constituent venue schedules in
       `crates/market-time-core/src/bands.rs`, marked derived, carrying the venue set
-- [ ] 3.2 Compute overlap windows with uncertainty no narrower than the widest input
-- [ ] 3.3 Vector: one constituent venue out of coverage makes the band unknown for that stretch
+- [x] 3.2 Compute overlap windows with uncertainty no narrower than the widest input
+- [x] 3.3 Vector: one constituent venue out of coverage makes the band unknown for that stretch
       rather than silently narrowing it to the remaining venues
 
 ## 4. Source verification (blocks everything above it that touches data)
