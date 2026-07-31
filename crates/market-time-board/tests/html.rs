@@ -8,8 +8,10 @@
 use market_time_board::{
     BandSection, BoardRow, BoardView, ClockDiscipline, HtmlOptions, NowMarker,
 };
+use market_time_core::Uncertainty;
 use market_time_core::VenueId;
 use market_time_core::{BandDefinition, BandId, DerivationNote};
+use market_time_core::{EvidenceRef, Phase, PhaseAnswer, PhaseBoundary, Timeline, TimelineSegment};
 use market_time_core::{Interval, UtcInstant};
 use market_time_core::{Ruleset, derive_band, derive_overlap, resolve_timeline};
 use market_time_data::load_ruleset;
@@ -258,6 +260,132 @@ fn a_hostile_venue_name_is_escaped_in_the_markup_and_the_json_payload() {
     assert!(
         payload.contains("\\\"quote"),
         "the embedded quote is a standard JSON escape, not a raw quote: {payload}"
+    );
+}
+
+/// A single-venue, single-segment board whose one evidence citation carries `source_url`
+/// verbatim — built by hand from [`Timeline`]'s own public fields rather than through a
+/// [`Ruleset`], because the evidence panel's escaping is a property of `render_html` alone
+/// and `inspect` (which `render_html` calls) is a pure lookup over an already-resolved
+/// [`Timeline`]. A dataset's evidence URL is operator-supplied and, per `evidence.rs`,
+/// carries no format or scheme validation at all — this is exactly what a hostile or
+/// merely careless dataset can put there.
+fn board_with_source_url(source_url: &str) -> BoardView {
+    let interval = Interval::new(
+        instant("2026-07-30T00:00:00Z"),
+        instant("2026-07-31T00:00:00Z"),
+    )
+    .expect("valid interval");
+    let venue = VenueId::new("SYNTH-SRC").expect("valid identifier");
+    let evidence = EvidenceRef::new(source_url, instant("2026-07-01T00:00:00Z"), "2026-01-01")
+        .expect("evidence is complete");
+    let answer = PhaseAnswer {
+        venue: venue.clone(),
+        phase: Phase::ContinuousTrading,
+        boundary_start: PhaseBoundary {
+            instant: interval.start,
+            uncertainty: Uncertainty::Exact,
+        },
+        boundary_end: PhaseBoundary {
+            instant: interval.end,
+            uncertainty: Uncertainty::Exact,
+        },
+        events: Vec::new(),
+        evidence: vec![evidence],
+        derived_reasoning: None,
+        uncertainty: Uncertainty::Exact,
+        dataset_revisions: Vec::new(),
+    };
+    let timeline = Timeline {
+        venue: venue.clone(),
+        interval,
+        segments: vec![TimelineSegment::Phase {
+            interval,
+            answer: Box::new(answer),
+        }],
+    };
+    BoardView {
+        interval,
+        rows: vec![BoardRow::new(timeline, None)],
+        now: None,
+        axis_zone: "UTC".to_owned(),
+        columns: 24,
+        bands: BandSection::default(),
+    }
+}
+
+/// What a Rust-only test can and cannot prove about the evidence link, now that it is
+/// built by the browser at hover time rather than by `render_html`: it can prove the
+/// payload still carries a hostile `source_url` as a properly quoted JSON string (so the
+/// `<script type="application/json">` element cannot be broken out of), and it can prove
+/// the shipped script contains the DOM-construction and scheme-allowlist code paths this
+/// fix relies on, rather than the vulnerable string-concatenation shape. It cannot prove
+/// what the browser does with that payload at runtime — that a `"` in the URL cannot
+/// break out of an `href="..."` attribute, or that a non-`http(s)` URL never becomes a
+/// clickable `<a>` — because nothing in this crate executes JavaScript. That half is
+/// covered separately, by hand, in a real browser (see the task's verification step).
+#[test]
+fn a_hostile_source_url_is_escaped_in_the_payload_and_the_script_builds_links_via_the_dom() {
+    let hostile = r#"https://synthetic.test/x?a="onmouseover="alert(1) x="#;
+    let board = board_with_source_url(hostile);
+    let html = market_time_board::render_html(&board, &HtmlOptions::default());
+    let payload = payload_text(&html);
+
+    // The quote is a standard JSON escape, not a raw quote — the payload cannot break out
+    // of the `<script type="application/json">` element's own syntax.
+    assert!(
+        payload.contains(r#"\"onmouseover=\"alert(1)"#),
+        "the embedded quote in the hostile source URL is JSON-escaped, not raw: {payload}"
+    );
+    assert!(
+        !payload.contains(r#""onmouseover="alert(1)"#),
+        "an unescaped quote must never survive next to the payload's own JSON syntax: {payload}"
+    );
+
+    // The script builds the link through the DOM — `.href` as a property, not a
+    // string-concatenated `href="..."` — which is what makes a `"` in the URL harmless
+    // regardless of what the browser does with it. This is a shape check on the shipped
+    // script, not proof of the runtime behaviour; see the doc comment above.
+    assert!(
+        html.contains("link.href = href;") && html.contains(r#"link.textContent = source.url;"#),
+        "the evidence link is assigned via DOM properties, not string concatenation"
+    );
+    assert!(
+        !html.contains("href=\""),
+        "no href attribute may ever be written by string concatenation in the shipped \
+         script — the old vulnerable shape built `href=\"` + a URL: {html}"
+    );
+}
+
+/// The scheme allowlist that keeps a `javascript:` (or any other non-`http(s)`) source
+/// URL from ever becoming a clickable link. As above, this proves the allowlist code
+/// shipped and that the static page never itself writes a `javascript:` URL into an
+/// `href` attribute — it cannot execute the script to confirm the link is actually
+/// rendered as inert text at runtime; that is the real-browser check.
+#[test]
+fn a_javascript_scheme_source_url_never_becomes_a_static_href_and_the_allowlist_ships() {
+    let board = board_with_source_url("javascript:alert(1)");
+    let html = market_time_board::render_html(&board, &HtmlOptions::default());
+
+    assert!(
+        !html.contains("href=\""),
+        "no href attribute — javascript: or otherwise — is ever written by string \
+         concatenation in the shipped page: {html}"
+    );
+    assert!(
+        html.contains(r#"parsed.protocol === "http:" || parsed.protocol === "https:""#),
+        "the shipped script allowlists http(s) before ever assigning `.href`"
+    );
+    assert!(
+        html.contains("new URL(String(value))"),
+        "the scheme check parses with `new URL`, not a hand-rolled regex on the string"
+    );
+
+    let payload = payload_text(&html);
+    assert!(
+        payload.contains("javascript:alert(1)"),
+        "the operator still sees, in the payload, what their dataset claims the source \
+         is — a rejected scheme is not silently dropped: {payload}"
     );
 }
 

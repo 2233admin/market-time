@@ -656,63 +656,104 @@ const SCRIPT: &str = r##"(function () {
     return holder.innerHTML;
   }
 
-  function renderSources(sources) {
-    if (!sources || sources.length === 0) { return ""; }
-    var out = '<ul class="mt-sources">';
-    for (var i = 0; i < sources.length; i += 1) {
-      var source = sources[i];
-      out += "<li><a href=\"" + escapeText(source.url) + "\" rel=\"noopener noreferrer\">"
-        + escapeText(source.url) + "</a> — fetched " + escapeText(source.fetchedAt)
-        + ", effective from " + escapeText(source.effectiveFrom);
-      if (source.publisherLastChanged) {
-        out += ", publisher last changed " + escapeText(source.publisherLastChanged);
-      }
-      out += "</li>";
+  // A source's URL only ever becomes a link when it parses as an absolute `http:` or
+  // `https:` URL — never `javascript:`, `data:`, `vbscript:`, a relative path, or
+  // anything `new URL` cannot parse. `new URL` is given no base, so a relative URL
+  // fails to parse rather than silently resolving against this page. Returning
+  // `parsed.href` rather than the raw string means what gets assigned to `.href` below
+  // is always what the URL parser itself understood, not operator-supplied bytes.
+  function linkableHref(value) {
+    try {
+      var parsed = new URL(String(value));
+      return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+    } catch (error) {
+      return null;
     }
-    out += "</ul>";
-    return out;
   }
 
+  // Built through the DOM — `createElement`, `.textContent`, the `.href` property —
+  // rather than string-concatenated markup. That is what makes a `"` in `source.url`
+  // harmless: there is no attribute-context string for it to break out of, because no
+  // such string is ever built. An operator still sees the raw URL either way — as a
+  // link when it allowlists, as plain text when it does not — it is just never turned
+  // into markup.
+  function renderSourceItem(source) {
+    var item = document.createElement("li");
+    var href = linkableHref(source.url);
+    if (href !== null) {
+      var link = document.createElement("a");
+      link.textContent = source.url;
+      link.href = href;
+      link.rel = "noopener noreferrer";
+      item.appendChild(link);
+    } else {
+      item.appendChild(document.createTextNode(String(source.url)));
+    }
+    var tail = " — fetched " + source.fetchedAt + ", effective from " + source.effectiveFrom;
+    if (source.publisherLastChanged) {
+      tail += ", publisher last changed " + source.publisherLastChanged;
+    }
+    item.appendChild(document.createTextNode(tail));
+    return item;
+  }
+
+  function renderSources(container, sources) {
+    if (!sources || sources.length === 0) { return; }
+    var list = document.createElement("ul");
+    list.className = "mt-sources";
+    for (var i = 0; i < sources.length; i += 1) {
+      list.appendChild(renderSourceItem(sources[i]));
+    }
+    container.appendChild(list);
+  }
+
+  // Returns the markup that belongs before the sources list and the markup that
+  // belongs after it, so `showDetail` can splice the DOM-built source list (see
+  // `renderSources`) between the two without ever concatenating a URL into a string of
+  // markup itself.
   function renderDetail(detail) {
     var stretch = detail.stretch ? detail.stretch[state.zone] : null;
-    var html = '<p class="mt-evidence-title">' + escapeText(detail.label) + "</p>";
+    var head = '<p class="mt-evidence-title">' + escapeText(detail.label) + "</p>";
     if (detail.kind === "venue") {
-      html += "<p>" + (detail.phase
+      head += "<p>" + (detail.phase
         ? "phase: " + escapeText(String(detail.phase).replace(/_/g, " "))
         : "not known") + "</p>";
       if (detail.notKnownBecause) {
-        html += "<p>" + escapeText(detail.notKnownBecause)
+        head += "<p>" + escapeText(detail.notKnownBecause)
           + " — an unknown is not a closed market.</p>";
       }
     } else {
-      html += "<p>state: " + escapeText(detail.state)
+      head += "<p>state: " + escapeText(detail.state)
         + " (derived — not a venue's published schedule)</p>";
     }
     if (stretch) {
-      html += "<p>stretch: " + escapeText(stretch.start) + " – " + escapeText(stretch.end)
+      head += "<p>stretch: " + escapeText(stretch.start) + " – " + escapeText(stretch.end)
         + " (" + escapeText(state.zone) + ")</p>";
     }
     if (detail.kind === "venue") {
-      html += "<p>start uncertainty: " + escapeText(detail.startUncertainty || "not known") + "</p>";
-      html += "<p>end uncertainty: " + escapeText(detail.endUncertainty || "not known") + "</p>";
+      head += "<p>start uncertainty: " + escapeText(detail.startUncertainty || "not known") + "</p>";
+      head += "<p>end uncertainty: " + escapeText(detail.endUncertainty || "not known") + "</p>";
     } else {
-      html += "<p>uncertainty: " + escapeText(detail.uncertainty) + "</p>";
+      head += "<p>uncertainty: " + escapeText(detail.uncertainty) + "</p>";
     }
     if (detail.derivedReasoning) {
-      html += "<p>derived: " + escapeText(detail.derivedReasoning) + "</p>";
+      head += "<p>derived: " + escapeText(detail.derivedReasoning) + "</p>";
     }
-    html += renderSources(detail.sources);
+    var tail = "";
     if (detail.datasetRevisions && detail.datasetRevisions.length) {
-      html += "<p>revisions: " + escapeText(detail.datasetRevisions.join(", ")) + "</p>";
+      tail += "<p>revisions: " + escapeText(detail.datasetRevisions.join(", ")) + "</p>";
     }
-    return html;
+    return { head: head, tail: tail };
   }
 
   function showDetail(id) {
     var detail = payload.segments ? payload.segments[id] : null;
     if (!detail || !evidenceEl) { return; }
     state.activeId = id;
-    evidenceEl.innerHTML = renderDetail(detail);
+    var parts = renderDetail(detail);
+    evidenceEl.innerHTML = parts.head;
+    renderSources(evidenceEl, detail.sources);
+    if (parts.tail) { evidenceEl.insertAdjacentHTML("beforeend", parts.tail); }
   }
 
   function clearDetail() {
