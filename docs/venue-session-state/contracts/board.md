@@ -148,6 +148,47 @@ person never triggers is, for that person, the same as it not existing. The mark
 small and MUST NOT be drawn, nor the footnote line printed, for a render where no segment's
 uncertainty is `None`.
 
+## The interactive HTML surface
+
+`market_time_board::render_html` renders one self-contained, interactive HTML page: the
+same picture `render_svg`/`render_svg_with` draw, embedded verbatim, with hover, a zone
+selector, and a live clock layered on top. It is a renderer over this same contract, not a
+fourth mode with rules of its own — everything above about what the board may and may not
+compute applies to it unchanged. Three points are specific to this surface:
+
+- **No network, ever.** The page is inline CSS, inline JS, and an inline JSON payload —
+  no `<link>`, no external font, no CDN, no analytics beacon, and no reference to any
+  `http://`/`https://` resource other than an evidence source URL the dataset itself
+  supplied (and the SVG namespace URI every `<svg>` element carries by specification). A
+  page that phoned home would leak which venues an operator watches.
+- **One geometry.** The interactive picture is `render_svg_with`'s own output, not a
+  second drawing in HTML/CSS. Hover targets are identified by a `data-seg` attribute
+  already present on the rendered element; nothing about where a segment sits on the page
+  is computed a second time in this surface or in its script.
+- **Nothing is derived twice.** Every fact the hover panel can show — a phase, a band
+  state, an uncertainty, a source, a derivation note — is read out of `inspect` or the
+  already-derived `SessionBand`/`BandOverlap` the caller handed to `BandSection`, and
+  serialised into the JSON payload at render time. The script only looks values up in
+  that payload; it MUST NOT recompute a phase, an uncertainty, or a zone conversion.
+  Zone conversion in particular runs once, in Rust, against the pinned IANA database
+  this workspace bundles, for every zone offered — the payload carries one precomputed
+  label set per zone, and switching zones only swaps which set is shown. There is no
+  `Intl.DateTimeFormat` call and no zone-aware `Date` arithmetic anywhere in the page's
+  own script, because the browser's zone data is neither pinned nor reproducible
+  (Constitution Principle III) and this page's claims must be.
+- **The live clock is the one deliberate exception**, and it is deliberately narrow: only
+  when `now` came from a live host-clock read (never when it was supplied via a fixed
+  instant) does the script advance the already-drawn "now" line, using the browser's own
+  clock against the interval's own bounds — plain arithmetic on two already-known
+  instants, not a zone conversion. It is permanently captioned "browser clock — discipline
+  unmeasured" whenever it ticks, and it is never drawn with more weight than an evidenced
+  phase boundary. A page rendered against a supplied instant shows that instant as stated
+  and draws no live line at all — the two markers are never allowed to be confused with
+  each other.
+- **Works with JavaScript disabled.** The picture, the legend, the sources block, and the
+  footer are static markup; hover, zone switching, and the live clock are enhancements on
+  top of it, never a requirement for reading the board.
+
 ## Violations
 
 The board is non-conforming if it: reads the clock more than once per render or lets venues in
@@ -159,6 +200,12 @@ instead of taking it fresh from each `resolve_phases` call; draws a band or over
 without labelling it derived; draws a band's or overlap's state in the same glyph or colour
 vocabulary as a `Phase`; renders an `Unknown` band or overlap stretch with anything other
 than the venue section's own not-known hatch; renders an empty `BandSection` as anything
-other than exactly the board this contract describes with no bands at all; or leaves a
+other than exactly the board this contract describes with no bands at all; leaves a
 `None` `BandSegment`/`OverlapSegment` uncertainty stated only in a hover title, with nothing
-in the default, un-hovered view to show it.
+in the default, un-hovered view to show it; or, for the interactive HTML surface
+specifically: makes any network reference outside an evidence source URL or the SVG
+namespace URI; recomputes a segment's position, phase, uncertainty, or zone-converted label
+in JavaScript instead of reading it from the payload this crate built in Rust; advances the
+live clock line when `now` was supplied rather than read from a live clock, or fails to
+caption it "browser clock — discipline unmeasured" whenever it does tick; or renders a page
+that cannot be read at all with JavaScript disabled.

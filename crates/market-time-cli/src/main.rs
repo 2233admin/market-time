@@ -9,7 +9,8 @@
 //! nanoseconds, and no surface here may imply that it does.
 
 use market_time_board::{
-    BandSection, BoardRow, BoardView, ClockDiscipline, NowMarker, SegmentDetail,
+    BandSection, BoardRow, BoardView, ClockDiscipline, DatasetRevisionFooter, HtmlOptions,
+    NowMarker, SegmentDetail,
 };
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
@@ -34,7 +35,7 @@ market-time — what phase is a venue in, and how well is that known?
 USAGE
   market-time phase    --dataset <path> [--venue <id>] [--at <rfc3339|now>] [--format text|json]
   market-time evidence --dataset <path>  --venue <id> [--at <rfc3339|now>] [--format text|json]
-  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg] [--no-bands]
+  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg|html] [--no-bands]
   market-time timeline --dataset <path>  --venue <id> [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time bands    --dataset <path> [--band <id>]... [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time venues   --dataset <path>
@@ -54,6 +55,17 @@ NOTES
   --format svg on `board` writes a self-contained SVG to stdout: redirect it to a file and
   open it. Colour is never the only channel there either — every row is labelled, and an
   out-of-coverage stretch is hatched rather than merely paler.
+
+  --format html on `board` writes one self-contained, interactive HTML page to stdout —
+  inline CSS and JS, no external request of any kind, so it works with no network and never
+  leaks which venues an operator watches. The picture is the same SVG `--format svg` draws,
+  embedded verbatim; hovering or focusing a segment shows its evidence (from the same
+  answer `evidence` prints, not recomputed in the browser), a zone selector relabels the
+  axis and every segment's stretch using label sets this shell precomputes per zone in
+  Rust, and a live clock line advances on the browser's own clock — permanently captioned
+  \"browser clock — discipline unmeasured\" — except when --at supplied a fixed instant,
+  in which case that instant is shown as stated and nothing ticks. The footer names the
+  dataset revision(s) and the pinned IANA tzdb version the page was rendered from.
 
   `board` also derives every session band the dataset declares (over the same window as
   its venue rows) and every pairwise overlap between them, and draws both beneath the
@@ -424,11 +436,52 @@ fn board_command(
         bands,
     };
 
-    if options.format == Format::Svg {
-        return Ok(market_time_board::render_svg(&view));
+    match options.format {
+        Format::Svg => Ok(market_time_board::render_svg(&view)),
+        Format::Html => {
+            let html_options = HtmlOptions {
+                zones: board_zones(ruleset, &options.zone),
+                dataset_revisions: dataset_revisions_footer(ruleset),
+                ..HtmlOptions::default()
+            };
+            Ok(market_time_board::render_html(&view, &html_options))
+        }
+        Format::Text | Format::Json => Ok(market_time_board::render(&view)),
     }
+}
 
-    Ok(market_time_board::render(&view))
+/// The zones `--format html`'s selector offers: every venue's home zone, deduplicated, in
+/// the order the dataset lists them, plus `--zone`'s own axis zone (so the page's default
+/// zone is always one of its own choices). `render_html` additionally guarantees `"UTC"` is
+/// present even if this list omits it, so that fallback is not repeated here.
+fn board_zones(ruleset: &Ruleset, axis_zone: &str) -> Vec<String> {
+    let mut zones: Vec<String> = Vec::new();
+    for venue in ruleset.venues() {
+        if let Some(venue_rules) = ruleset.venue(&venue) {
+            let zone = venue_rules.home_zone.as_str().to_owned();
+            if !zones.contains(&zone) {
+                zones.push(zone);
+            }
+        }
+    }
+    if !zones.contains(&axis_zone.to_owned()) {
+        zones.push(axis_zone.to_owned());
+    }
+    zones
+}
+
+/// The dataset revisions named in `--format html`'s footer, read straight off the
+/// `Ruleset` the CLI already loaded — `market_time_board` has no access to a `Ruleset` and
+/// so cannot build this list itself.
+fn dataset_revisions_footer(ruleset: &Ruleset) -> Vec<DatasetRevisionFooter> {
+    ruleset
+        .revisions()
+        .iter()
+        .map(|revision| DatasetRevisionFooter {
+            id: revision.id.to_string(),
+            iana_tzdb_version: revision.iana_tzdb_version.clone(),
+        })
+        .collect()
 }
 
 fn timeline_command(
@@ -730,6 +783,8 @@ enum Format {
     Json,
     /// For eyes. The board as a self-contained SVG document.
     Svg,
+    /// For eyes, with a mouse. The board as a self-contained, interactive HTML page.
+    Html,
 }
 
 struct Options {
@@ -793,8 +848,11 @@ impl Options {
                         "text" => Format::Text,
                         "json" => Format::Json,
                         "svg" => Format::Svg,
+                        "html" => Format::Html,
                         other => {
-                            return Err(format!("--format {other:?} is not text, json, or svg"));
+                            return Err(format!(
+                                "--format {other:?} is not text, json, svg, or html"
+                            ));
                         }
                     };
                 }

@@ -72,6 +72,24 @@ ships here, now or ever.
     never `glyph`'s phase characters. An `Unknown` band or overlap stretch uses the same
     `url(#not-known)` hatch the venue rows already use — the one visual promise this board
     makes about "not known," kept consistent rather than duplicated.
+  - `render_html` — the board as one self-contained, interactive HTML page: the same
+    `render_svg_with` output, embedded verbatim, with hover, a zone selector, and a live
+    clock layered on top rather than a second drawing of the picture. Hovering or
+    focusing any segment shows its evidence from an inline JSON payload this crate builds
+    from `inspect` and the already-derived bands/overlaps at render time — the script
+    never recomputes a phase, an uncertainty, or a zone conversion; the zone selector
+    swaps between per-zone label sets this crate precomputes against the pinned IANA
+    database, never `Intl.DateTimeFormat` or zone-aware `Date` arithmetic in the browser.
+    The one deliberate exception is the live clock: when `now` came from a live
+    host-clock read (never from a supplied instant), the script advances the already-drawn
+    "now" line on the browser's own clock, permanently captioned "browser clock —
+    discipline unmeasured," and never with more weight than an evidenced boundary. The
+    page makes no network reference of any kind — no external asset URL survives outside
+    an evidence source URL the dataset supplied — and reads with JavaScript disabled: the
+    picture, legend, sources, and footer are static markup, and only hover, zone
+    switching, and the clock are enhancements. The footer names the dataset revision(s)
+    and pinned IANA tzdb version the page was rendered from. `market-time` CLI:
+    `board --format html`.
 - **The operator path** — `SourceRegistration` (which cannot be built without the terms the
   source may be used under), the `SourceFetcher` trait with a `FileFetcher` implementation,
   and `RevisionAssembly`, which transcribes evidence from the retrieval — URL, fetch time,
@@ -99,7 +117,7 @@ ships here, now or ever.
 
 ### Verification
 
-145 tests, including 24 golden vectors and two mechanical Principle IV guards. `cargo fmt`,
+163 tests, including 24 golden vectors and two mechanical Principle IV guards. `cargo fmt`,
 `clippy -D warnings`, and `cargo test --workspace` all clean. Quickstart validation recorded
 in `docs/venue-session-state/quickstart-results.md`.
 

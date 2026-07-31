@@ -190,6 +190,92 @@ fn the_board_draws_a_row_per_venue_with_a_key() {
 }
 
 #[test]
+fn board_html_emits_a_self_contained_interactive_document() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--hours",
+        "24",
+        "--format",
+        "html",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(
+        text.starts_with("<!doctype html"),
+        "the page starts with the doctype: {}",
+        &text[..80.min(text.len())]
+    );
+    assert!(text.trim_end().ends_with("</html>"), "{text}");
+    assert!(
+        text.contains(r#"<script type="application/json" id="mt-payload">"#),
+        "the hover payload is embedded: {text}"
+    );
+    for venue in ["SYNTH-ALWAYS", "SYNTH-AUCT", "SYNTH-DST"] {
+        assert!(text.contains(venue), "{text}");
+    }
+    assert!(
+        text.contains("rendered from dataset revision(s): synthetic-2026-07-30"),
+        "the footer names the dataset revision: {text}"
+    );
+    assert!(
+        text.contains("IANA tzdb 2026c"),
+        "and the pinned tzdb version: {text}"
+    );
+    assert!(
+        text.contains(r#"id="mt-zone-select""#),
+        "a zone selector is offered: {text}"
+    );
+    // Every venue's home zone plus UTC, per the CLI's own note in USAGE.
+    for zone in ["Asia/Shanghai", "America/New_York", "UTC"] {
+        assert!(
+            text.contains(&format!(r#"<option value="{zone}""#)),
+            "zone {zone} is offered: {text}"
+        );
+    }
+}
+
+#[test]
+fn board_html_no_bands_suppresses_the_derived_section() {
+    let with_bands = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--format",
+        "html",
+    ]);
+    assert!(with_bands.status.success(), "{}", stderr(&with_bands));
+    let with_bands_text = stdout(&with_bands);
+    assert!(
+        with_bands_text.contains("DERIVED SESSION BANDS"),
+        "bands render by default: {with_bands_text}"
+    );
+
+    let without_bands = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--format",
+        "html",
+        "--no-bands",
+    ]);
+    assert!(without_bands.status.success(), "{}", stderr(&without_bands));
+    let without_bands_text = stdout(&without_bands);
+    assert!(
+        !without_bands_text.contains("DERIVED"),
+        "--no-bands suppresses the derived section entirely: {without_bands_text}"
+    );
+}
+
+#[test]
 fn the_timeline_tiles_the_window_it_was_asked_for() {
     let output = run(&[
         "timeline",
@@ -368,7 +454,7 @@ fn an_unusable_format_is_refused() {
     let output = run(&["phase", "--dataset", &fixture(), "--format", "yaml"]);
     assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("is not text, json, or svg"),
+        stderr(&output).contains("is not text, json, svg, or html"),
         "{}",
         stderr(&output)
     );
