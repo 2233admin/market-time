@@ -6,6 +6,7 @@ members = [
     "crates/market-time-data",
     "crates/market-time-cli",
     "crates/market-time-board",
+    "crates/market-time-server",
 ]
 
 [workspace.package]
@@ -47,3 +48,18 @@ serde_json = "1"
 # Content digests for fetched source documents, so provenance names the exact bytes a
 # venue returned rather than only the URL they came from.
 sha2 = "0.10"
+
+# Production HTTP shell. Domain logic remains in market-time-core.
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tower = { version = "0.5", features = ["limit", "timeout", "util"] }
+tower-http = { version = "0.7", features = [
+    "compression-gzip",
+    "cors",
+    "fs",
+    "request-id",
+    "trace",
+    "uuid",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

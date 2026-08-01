@@ -81,6 +81,31 @@ uncertainty on each boundary. `market-time timeline` prints the segments a board
 from, including the stretches that fall outside coverage — those come back as "not known", never
 as a schedule someone extrapolated.
 
+To serve the same answers over HTTP, start the thin service shell with an operator dataset:
+
+```bash
+cargo run -p market-time-server -- --dataset crates/market-time-data/fixtures/synthetic-venues.json
+```
+
+It listens on `127.0.0.1:8080` by default. `GET /health` reports loaded revisions,
+`GET /v1/venues` returns the catalog, and `GET /v1/status` answers every venue at one shared
+host-clock instant. Supply a replayable instant with
+`GET /v1/status?at=2026-07-30T02:00:00Z`.
+
+The same process serves the browser board at <http://127.0.0.1:8080/>. It is a responsive
+global clockboard: browser clocks update every second, while phase, current service-defined
+boundary, calendar exception, event, evidence, uncertainty, coverage, and dataset revision are
+always read from `/v1/status`. A known calendar exception is returned as
+`calendar.kind` / `calendar.label`; coverage gaps stay `status: "unknown"`, never a client-side
+guess that the venue is closed. Use the UTC inspection control in the board to replay a calendar
+instant such as `2026-10-01T02:00:00Z` against the server.
+
+The HTTP shell runs on `axum` and Tokio. It handles requests concurrently with a process-wide
+256-request ceiling, applies a 10-second timeout, returns an `x-request-id`, allows browser GETs,
+compresses eligible responses, and emits `tower-http` request traces. Set `RUST_LOG` to tune
+logging; for example `RUST_LOG=market_time_server=debug,tower_http=debug`. Ctrl-C and SIGTERM
+stop accepting work and let in-flight responses finish.
+
 ## Answering for a real venue
 
 No venue data ships here, and none ever will: every launch venue forbids commercial

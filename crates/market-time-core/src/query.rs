@@ -25,6 +25,10 @@ pub struct PhaseAnswer {
     pub venue: VenueId,
     /// The phase, from the shared vocabulary.
     pub phase: Phase,
+    /// The category of the calendar rule that governs this venue-local date.
+    pub calendar_rule_kind: String,
+    /// The venue's own label for the governing calendar rule.
+    pub calendar_label: String,
     /// When the phase started.
     pub boundary_start: PhaseBoundary,
     /// When it ends.

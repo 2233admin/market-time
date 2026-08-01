@@ -9,6 +9,7 @@
 //! ambiguity-preserving path. A local time that occurs twice, or that does not exist at
 //! all, becomes a value on the answer rather than a silent pick (FR-014).
 
+use crate::civil::datetime_at;
 use crate::coverage::CoverageGap;
 use crate::event::{EventOccurrence, EventRule};
 use crate::evidence::EvidenceRef;
@@ -21,27 +22,8 @@ use crate::query::{
 use crate::rule::Rule;
 use crate::ruleset::{Ruleset, VenueRuleset};
 use crate::uncertainty::Uncertainty;
-use jiff::Timestamp;
 use jiff::civil::{Date, DateTime, Time};
 use jiff::tz::{AmbiguousOffset, TimeZone};
-
-/// The venue-local civil datetime for `at`.
-///
-/// Saturates at the representable calendar rather than panicking: an instant outside
-/// jiff's range is far outside any venue's declared coverage, so the query it belongs to
-/// is answered as unknown regardless.
-#[must_use]
-pub(crate) fn civil_datetime(zone: &TimeZone, at: UtcInstant) -> DateTime {
-    let timestamp =
-        Timestamp::from_nanosecond(at.as_nanos_since_unix_epoch()).unwrap_or_else(|_| {
-            if at.as_nanos_since_unix_epoch() < 0 {
-                Timestamp::MIN
-            } else {
-                Timestamp::MAX
-            }
-        });
-    zone.to_datetime(timestamp)
-}
 
 /// What phase is `venue` in at `at`?
 ///
@@ -63,7 +45,7 @@ pub fn resolve_phase(at: UtcInstant, venue: &VenueId, ruleset: &Ruleset) -> Phas
         );
     }
 
-    let local = civil_datetime(zone, at);
+    let local = datetime_at(zone, at);
     // A phase can start on the previous local day and run past midnight, so the day
     // before is a candidate too.
     let mut candidates = Vec::new();
@@ -160,7 +142,7 @@ pub fn resolve_timeline(interval: Interval, venue: &VenueId, ruleset: &Ruleset) 
             if guard > MAX_TIMELINE_DAYS {
                 break;
             }
-            let date = civil_datetime(zone, cursor).date();
+            let date = datetime_at(zone, cursor).date();
             let day = day_segments(venue_rules, zone, date);
             let mut advanced = false;
             for segment in day {
@@ -250,6 +232,8 @@ impl DaySegment {
         PhaseAnswer {
             venue,
             phase: self.phase,
+            calendar_rule_kind: self.rule.kind.kind_name().to_owned(),
+            calendar_label: self.rule.kind.label().to_owned(),
             boundary_start: PhaseBoundary {
                 instant: self.interval.start,
                 uncertainty: self.start_uncertainty,
@@ -369,8 +353,8 @@ fn to_utc(zone: &TimeZone, dt: DateTime) -> (UtcInstant, Option<Uncertainty>) {
 
 fn events_in(rules: &[EventRule], zone: &TimeZone, interval: Interval) -> Vec<EventOccurrence> {
     let mut occurrences = Vec::new();
-    let mut date = civil_datetime(zone, interval.start).date();
-    let last = civil_datetime(zone, interval.end).date();
+    let mut date = datetime_at(zone, interval.start).date();
+    let last = datetime_at(zone, interval.end).date();
 
     loop {
         for rule in rules.iter().filter(|rule| rule.applies.contains(date)) {

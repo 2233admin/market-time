@@ -186,7 +186,7 @@ impl Ruleset {
 }
 
 fn local_date(zone: &TimeZone, at: UtcInstant) -> Date {
-    crate::resolve::civil_datetime(zone, at).date()
+    crate::civil::datetime_at(zone, at).date()
 }
 
 /// Why a ruleset could not be built.

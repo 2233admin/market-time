@@ -1,0 +1,53 @@
+# Mark Time's architecture is deliberately inward-facing: shells use adapters and the
+# pure core; the core never reaches back to either one.
+
+[constraints]
+max_cycles = 0
+ignore_test_dependencies = true
+
+[[layers]]
+name = "shells"
+paths = [
+  "crates/market-time-cli/src/*",
+  "crates/market-time-board/src/*",
+  "crates/market-time-server/src/*",
+]
+order = 0
+
+[[layers]]
+name = "ingest-and-scales"
+paths = [
+  "crates/market-time-data/src/*",
+  "crates/market-time-scales/src/*",
+]
+order = 1
+
+[[layers]]
+name = "core"
+paths = ["crates/market-time-core/src/*"]
+order = 2
+
+[[boundaries]]
+from = "crates/market-time-core/*"
+to = "crates/market-time-data/*"
+reason = "The phase engine accepts materialized rule data and must never perform ingestion I/O."
+
+[[boundaries]]
+from = "crates/market-time-core/*"
+to = "crates/market-time-scales/*"
+reason = "Scale conversion is an ingest boundary; core receives UTC instants only."
+
+[[boundaries]]
+from = "crates/market-time-core/*"
+to = "crates/market-time-cli/*"
+reason = "The pure core must not depend on a command-line shell."
+
+[[boundaries]]
+from = "crates/market-time-core/*"
+to = "crates/market-time-board/*"
+reason = "The pure core must not depend on a rendering shell."
+
+[[boundaries]]
+from = "crates/market-time-core/*"
+to = "crates/market-time-server/*"
+reason = "The pure core must not depend on HTTP, the host clock, or transport concerns."

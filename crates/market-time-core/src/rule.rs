@@ -122,6 +122,17 @@ pub enum RuleKind {
 }
 
 impl RuleKind {
+    /// A stable category for consumers that distinguish ordinary and exceptional dates.
+    #[must_use]
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Self::WeeklyPattern { .. } => "weekly_pattern",
+            Self::Holiday { .. } => "holiday",
+            Self::ShortenedSession { .. } => "shortened_session",
+            Self::AnnouncedChange { .. } => "announced_change",
+        }
+    }
+
     /// Higher wins when more than one rule applies to a date.
     #[must_use]
     pub fn precedence(&self) -> u8 {

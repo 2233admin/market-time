@@ -8,6 +8,7 @@
 
 use crate::ids::IanaZoneId;
 use crate::instant::UtcInstant;
+use jiff::Timestamp;
 use jiff::civil::DateTime;
 use jiff::tz::{AmbiguousOffset, Offset, TimeZone};
 use std::fmt;
@@ -209,6 +210,22 @@ pub(crate) fn instant_of(offset: Offset, datetime: DateTime) -> UtcInstant {
         |_| UtcInstant::from_nanos_since_unix_epoch(0),
         |timestamp| UtcInstant::from_nanos_since_unix_epoch(timestamp.as_nanosecond()),
     )
+}
+
+/// Returns the civil datetime for an absolute instant, saturating at Jiff's bounds.
+///
+/// An out-of-range instant is outside every usable coverage declaration, but callers
+/// still need a stable civil date to construct that explicit unknown answer.
+pub(crate) fn datetime_at(zone: &TimeZone, at: UtcInstant) -> DateTime {
+    let timestamp =
+        Timestamp::from_nanosecond(at.as_nanos_since_unix_epoch()).unwrap_or_else(|_| {
+            if at.as_nanos_since_unix_epoch() < 0 {
+                Timestamp::MIN
+            } else {
+                Timestamp::MAX
+            }
+        });
+    zone.to_datetime(timestamp)
 }
 
 #[cfg(test)]

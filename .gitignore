@@ -49,3 +49,10 @@ desktop.ini
 # that fetched data must stay untracked.
 /data/cache/
 .gstack/
+
+# Sentrux rules and their reviewed structural baseline govern this repository.
+# The user-level Git ignore treats .sentrux as local by default; keep this project's
+# architecture contract visible to every clone.
+!.sentrux/
+!.sentrux/rules.toml
+!.sentrux/baseline.json

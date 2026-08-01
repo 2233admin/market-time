@@ -83,6 +83,8 @@ fn v006_holiday_outranks_the_weekly_pattern() {
     // 1 October 2026 is a Thursday: the weekly pattern would say trading.
     let answer = known("SYNTH-AUCT", "2026-10-01T02:00:00Z");
     assert_eq!(answer.phase, Phase::Closed);
+    assert_eq!(answer.calendar_rule_kind, "holiday");
+    assert_eq!(answer.calendar_label, "Synthetic National Day");
     assert!(
         answer
             .evidence
