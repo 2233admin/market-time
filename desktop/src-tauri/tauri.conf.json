@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mark Time",
+  "version": "0.1.0",
+  "identifier": "com.markettime.desktop",
+  "build": {
+    "frontendDist": "../../web/out"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "widget",
+        "title": "Mark Time",
+        "url": "widget.html",
+        "width": 380,
+        "height": 560,
+        "minWidth": 320,
+        "minHeight": 420,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "skipTaskbar": true,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "capabilities": ["desktop"],
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self'",
+        "connect-src": "ipc: http://ipc.localhost http://127.0.0.1:8080"
+      }
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all"
+  }
+}

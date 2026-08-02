@@ -72,6 +72,10 @@ export interface TransitionReminder {
 	fireAt: string;
 }
 
+export interface ScheduledTransitionReminder extends TransitionReminder {
+	notification: "approaching" | "reached";
+}
+
 export interface TimelinePayload {
 	at: string;
 	clock: {
@@ -118,6 +122,60 @@ export interface SourceSummary {
 	fetchedAt: string;
 	effectiveFrom: string;
 	publisherLastChanged: string | null;
+}
+
+export function formatZonedTime(at: Date, zone: string | null): string {
+	const format = (timeZone: string) =>
+		new Intl.DateTimeFormat("zh-CN", {
+			hour: "2-digit",
+			minute: "2-digit",
+			second: "2-digit",
+			hour12: false,
+			timeZone,
+		}).format(at);
+	if (zone === null) return `${format("UTC")} UTC · 时区未知`;
+	try {
+		return format(zone);
+	} catch {
+		return `${format("UTC")} UTC · 时区不可用`;
+	}
+}
+
+export function statusMatchesTimeline(
+	status: StatusPayload,
+	timeline: TimelinePayload,
+): boolean {
+	return (
+		status.at === timeline.at &&
+		status.tzdb_version === timeline.tzdb_version &&
+		status.dataset_revisions.length === timeline.dataset_revisions.length &&
+		status.dataset_revisions.every(
+			(revision, index) => revision === timeline.dataset_revisions[index],
+		)
+	);
+}
+
+export function serverAnchoredNow(
+	serverAt: string,
+	receivedAt: number,
+	monotonicNow: number,
+	frozenAt: number | null,
+): Date {
+	return new Date(
+		Date.parse(serverAt) + Math.max(0, (frozenAt ?? monotonicNow) - receivedAt),
+	);
+}
+
+export function staleSnapshotReason(
+	error: string | null,
+	hasSnapshot: boolean,
+	age: number,
+	maximumAge: number,
+): string | null {
+	if (error) return error;
+	return hasSnapshot && age > maximumAge
+		? `快照超过 ${Math.round(maximumAge / 1_000)} 秒未更新`
+		: null;
 }
 
 export interface SegmentLike {
@@ -283,6 +341,54 @@ export function nextTransitionReminder(
 					Date.parse(left.transitionAt) - Date.parse(right.transitionAt),
 			)[0] ?? null
 	);
+}
+
+export function transitionReminders(
+	venues: VenueTimeline[],
+	at: string | Date,
+	leadMinutes: number,
+	venueIds?: readonly string[],
+): ScheduledTransitionReminder[] {
+	const now = at instanceof Date ? at.getTime() : Date.parse(at);
+	if (!Number.isFinite(now) || !Number.isFinite(leadMinutes)) return [];
+	const minutes = Math.max(0, Math.floor(leadMinutes));
+	const lead = minutes * 60_000;
+	const selected =
+		venueIds === undefined
+			? null
+			: new Set(venueIds.map((id) => id.toLowerCase()));
+
+	return venues
+		.flatMap((venue): ScheduledTransitionReminder[] => {
+			if (selected && !selected.has(venue.id.toLowerCase())) return [];
+			const transition = venue.next_trading_transition;
+			if (!transition) return [];
+			const transitionAt = Date.parse(transition.at);
+			if (!Number.isFinite(transitionAt) || transitionAt <= now) return [];
+			const base = {
+				venueId: venue.id,
+				venueName: venue.display_name,
+				kind: transition.kind,
+				transitionAt: transition.at,
+			};
+			const reached: ScheduledTransitionReminder = {
+				...base,
+				key: `${venue.id}:${transition.kind}:${transition.at}:reached`,
+				notification: "reached",
+				fireAt: new Date(transitionAt).toISOString(),
+			};
+			if (!lead) return [reached];
+			return [
+				{
+					...base,
+					key: `${venue.id}:${transition.kind}:${transition.at}:approaching`,
+					notification: "approaching",
+					fireAt: new Date(transitionAt - lead).toISOString(),
+				},
+				reached,
+			];
+		})
+		.sort((left, right) => Date.parse(left.fireAt) - Date.parse(right.fireAt));
 }
 
 export function cursorPercent(

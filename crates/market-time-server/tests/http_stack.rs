@@ -253,6 +253,23 @@ async fn frontend_is_served_without_relaxing_api_route_errors() {
             .expect("content type is ASCII")
             .starts_with("text/html")
     );
+
+    let widget = app(ruleset())
+        .oneshot(
+            Request::builder()
+                .uri("/widget")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("router is infallible");
+    assert_eq!(widget.status(), StatusCode::OK);
+    assert!(
+        widget.headers()[header::CONTENT_TYPE]
+            .to_str()
+            .expect("content type is ASCII")
+            .starts_with("text/html")
+    );
 }
 
 #[tokio::test]

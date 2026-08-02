@@ -1,6 +1,7 @@
 # Mark Time
 
-Open-source, versioned and auditable time infrastructure for global financial markets.
+Open-source, versioned, and auditable time infrastructure for global financial markets — with a
+pure Rust engine, HTTP API, browser board, and an optional Windows desktop widget.
 
 ## What it is
 
@@ -8,14 +9,26 @@ Mark Time answers one question with auditable precision: what time is it, and wh
 open, where. It serves global city clocks, exchange trading sessions and phases, and
 crypto funding and maintenance windows.
 
+The repository currently ships four surfaces over the same rule output:
+
+- **Rust core and CLI** for deterministic phase, timeline, and evidence queries.
+- **HTTP service** for stable `/v1/status`, `/v1/timeline`, and venue catalog contracts.
+- **Browser board** for a global, inspectable trading timetable and evidence settings.
+- **Windows desktop widget** for an always-on-top market snapshot, server-derived countdowns,
+  tray lifecycle, and optional per-market notifications.
+
+The browser and desktop clients do not implement exchange calendars. They display validated
+server answers, freeze the last trusted snapshot when the service is unavailable, and preserve
+`known`/`unknown`, evidence, TZDB, and dataset-revision semantics at the edge.
+
 What sets it apart from an ordinary time/calendar library:
 
 - **Every answer is traceable to dated source evidence.** A session boundary, a holiday,
   a funding window — each one points back to the document it came from and when that
   document was read.
-- **Instants are nanosecond-precision and unambiguous about their frame** — an absolute
-  epoch instant, or a civil time bound to a named zone, never an implicit mixture of the
-  two.
+- **Core instants are nanosecond-precision and unambiguous about their frame** — an absolute epoch
+  instant, or a civil time bound to a named zone, never an implicit mixture of the two. UI clocks
+  render at human scale and make no unsupported accuracy claim.
 - **Uncertainty is stated, not guessed.** Where the data only supports a partial or
   provisional answer, Mark Time says so. Outside its verified coverage, it returns an
   explicit unknown rather than extrapolating a schedule.
@@ -36,9 +49,11 @@ as data.
 
 ## Status
 
-Pre-alpha, and it runs. The phase engine, the timeline query, the dataset loader, the CLI, and
-the board are implemented and tested; what is not here, and never will be, is venue data. The
-specification of this slice is in
+Pre-alpha, and it runs. The phase engine, timeline query, dataset loader, CLI, HTTP service,
+browser board, and Windows desktop widget are implemented and tested; what is not here, and never
+will be, is venue data. The desktop MVP specification is in
+[`openspec/changes/desktop-widget-mvp/`](openspec/changes/desktop-widget-mvp/), the original venue
+state specification is in
 [`openspec/changes/venue-session-state/`](openspec/changes/venue-session-state/); the research,
 data model, and interface contracts behind it are in
 [`docs/venue-session-state/`](docs/venue-session-state/).
@@ -112,6 +127,26 @@ The HTTP shell runs on `axum` and Tokio. It handles requests concurrently with a
 compresses eligible responses, and emits `tower-http` request traces. Set `RUST_LOG` to tune
 logging; for example `RUST_LOG=market_time_server=debug,tower_http=debug`. Ctrl-C and SIGTERM
 stop accepting work and let in-flight responses finish.
+
+### Windows desktop widget
+
+The optional Tauri client loads the static `/widget` page and consumes the same HTTP API. Start
+`market-time-server` on `127.0.0.1:8080`, then build the client:
+
+```powershell
+npm ci --prefix web
+# Optional: keep this exact HTTP(S) origin in the environment for both builds.
+# $env:NEXT_PUBLIC_MARK_TIME_API = "https://market-time.example"
+npm run build --prefix web
+Set-Location desktop
+cargo tauri build --no-bundle
+```
+
+The frameless window stays on top, closes to the tray, and can be shown, hidden, or fully exited
+from the tray menu. It freezes and labels the last snapshot when the HTTP service is unavailable;
+it does not calculate schedules locally. Set `NEXT_PUBLIC_MARK_TIME_API` before the web build to
+target a different HTTP(S) service origin, and keep the same variable set for the Tauri build so
+the desktop content-security policy is pinned to that exact origin.
 
 ## Answering for a real venue
 

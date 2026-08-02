@@ -10,13 +10,19 @@ import {
 	countSnapshot,
 	currentSegment,
 	cursorPercent,
+	formatZonedTime,
 	isStatusPayload,
 	isTimelinePayload,
 	marketHubState,
 	nextTransitionReminder,
 	rankVenueAttention,
 	type StatusPayload,
+	serverAnchoredNow,
+	staleSnapshotReason,
+	statusMatchesTimeline,
 	summarizeSources,
+	type TimelinePayload,
+	transitionReminders,
 	utcInstantAtPercent,
 	type VenueTimeline,
 	viewMode,
@@ -226,6 +232,95 @@ describe("server timeline presentation", () => {
 		).toBeNull();
 	});
 
+	it("scopes approaching and reached reminders to selected server venues", () => {
+		const venue = (id: string, at: string) =>
+			({
+				...validPayload.venues[0],
+				id,
+				display_name: id,
+				next_trading_transition: {
+					at,
+					kind: "opens" as const,
+					phase: "continuous_trading",
+				},
+			}) as VenueTimeline;
+
+		expect(
+			transitionReminders(
+				[
+					venue("XONE", "2026-08-01T12:30:00Z"),
+					venue("XTWO", "2026-08-01T13:00:00Z"),
+				],
+				validPayload.at,
+				15,
+				["xtwo"],
+			),
+		).toEqual([
+			{
+				key: "XTWO:opens:2026-08-01T13:00:00Z:approaching",
+				venueId: "XTWO",
+				venueName: "XTWO",
+				kind: "opens",
+				notification: "approaching",
+				transitionAt: "2026-08-01T13:00:00Z",
+				fireAt: "2026-08-01T12:45:00.000Z",
+			},
+			{
+				key: "XTWO:opens:2026-08-01T13:00:00Z:reached",
+				venueId: "XTWO",
+				venueName: "XTWO",
+				kind: "opens",
+				notification: "reached",
+				transitionAt: "2026-08-01T13:00:00Z",
+				fireAt: "2026-08-01T13:00:00.000Z",
+			},
+		]);
+		expect(
+			transitionReminders(
+				[venue("XONE", "2026-08-01T12:30:00Z")],
+				validPayload.at,
+				15,
+				[],
+			),
+		).toEqual([]);
+		expect(
+			transitionReminders(
+				[venue("XTWO", "2026-08-01T13:00:00Z")],
+				validPayload.at,
+				30,
+			).map((reminder) => reminder.key),
+		).toEqual([
+			"XTWO:opens:2026-08-01T13:00:00Z:approaching",
+			"XTWO:opens:2026-08-01T13:00:00Z:reached",
+		]);
+	});
+
+	it("labels timezone fallbacks instead of presenting UTC as venue-local time", () => {
+		const at = new Date("2026-08-01T12:00:00Z");
+		expect(formatZonedTime(at, null)).toContain("UTC · 时区未知");
+		expect(formatZonedTime(at, "Not/A_Zone")).toContain("UTC · 时区不可用");
+	});
+
+	it("anchors elapsed wall time to timeline receipt and expires old snapshots", () => {
+		expect(
+			serverAnchoredNow(validPayload.at, 1_000, 61_000, null).toISOString(),
+		).toBe("2026-08-01T12:01:00.000Z");
+		expect(
+			serverAnchoredNow(validPayload.at, 1_000, 76_001, 76_000).toISOString(),
+		).toBe("2026-08-01T12:01:15.000Z");
+		expect(
+			serverAnchoredNow(validPayload.at, 1_000, 90_000, 76_000).toISOString(),
+		).toBe("2026-08-01T12:01:15.000Z");
+		expect(staleSnapshotReason(null, true, 75_001, 75_000)).toBe(
+			"快照超过 75 秒未更新",
+		);
+		expect(staleSnapshotReason(null, true, 75_000, 75_000)).toBeNull();
+		expect(staleSnapshotReason(null, false, 100_000, 75_000)).toBeNull();
+		expect(staleSnapshotReason("服务不可用", false, 0, 75_000)).toBe(
+			"服务不可用",
+		);
+	});
+
 	it("positions the cursor only inside the server-supplied interval", () => {
 		const interval = {
 			start: "2026-08-01T00:00:00Z",
@@ -387,6 +482,25 @@ describe("server timeline presentation", () => {
 		};
 
 		expect(isStatusPayload(statusPayload)).toBe(true);
+		const matchingStatus = {
+			...statusPayload,
+			dataset_revisions: validPayload.dataset_revisions,
+		};
+		expect(
+			statusMatchesTimeline(
+				matchingStatus as StatusPayload,
+				validPayload as TimelinePayload,
+			),
+		).toBe(true);
+		expect(
+			statusMatchesTimeline(
+				{
+					...matchingStatus,
+					dataset_revisions: ["newer-rules"],
+				} as StatusPayload,
+				validPayload as TimelinePayload,
+			),
+		).toBe(false);
 		expect(
 			isStatusPayload({
 				...statusPayload,

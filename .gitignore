@@ -56,6 +56,7 @@ desktop.ini
 /web/node_modules/
 /web/.next/
 /web/*.tsbuildinfo
+/desktop/src-tauri/gen/
 
 # Sentrux rules and their reviewed structural baseline govern this repository.
 # The user-level Git ignore treats .sentrux as local by default; keep this project's
