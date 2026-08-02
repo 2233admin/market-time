@@ -69,7 +69,12 @@ jobs:
             throw "Expected exactly one MSI and one NSIS installer."
           }
 
-          $assets = @($archive, $msi[0].FullName, $nsis[0].FullName)
+          $msiAsset = Join-Path $PWD "dist\mark-time-$env:GITHUB_REF_NAME-windows-x86_64.msi"
+          $nsisAsset = Join-Path $PWD "dist\mark-time-$env:GITHUB_REF_NAME-windows-x86_64-setup.exe"
+          Copy-Item $msi[0].FullName $msiAsset
+          Copy-Item $nsis[0].FullName $nsisAsset
+
+          $assets = @($archive, $msiAsset, $nsisAsset)
           $assets | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_).Hash.ToLowerInvariant()
             "$hash  $([IO.Path]::GetFileName($_))"
@@ -81,8 +86,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = @(
-            (Get-ChildItem target\release\bundle\msi\*.msi).FullName
-            (Get-ChildItem target\release\bundle\nsis\*-setup.exe).FullName
+            (Get-ChildItem dist\*.msi).FullName
+            (Get-ChildItem dist\*.exe).FullName
             (Get-ChildItem dist\*.zip).FullName
             (Get-Item dist\SHA256SUMS.txt).FullName
           )
