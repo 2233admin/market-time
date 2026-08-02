@@ -1,0 +1,3 @@
+:HL["/_next/static/chunks/2gy9s_u5npqeg.css","style"]
+:HL["/_next/static/chunks/1a6gv_9utjitq.css","style"]
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"widget","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"market-time-web"}

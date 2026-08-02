@@ -1,6 +1,8 @@
 export const PRIMARY_ZONE_KEY = "mark-time-primary-zone";
 export const REMINDER_PREFERENCES_KEY = "mark-time-reminders";
 export const LAST_REMINDER_KEY = "mark-time-last-reminder";
+export const WIDGET_NOTIFIED_REMINDERS_KEY =
+	"mark-time-widget-notified-reminders";
 
 export const primaryTimeZones = [
 	{ id: "America/New_York", label: "纽约", code: "NYC" },
@@ -13,6 +15,7 @@ export const primaryTimeZones = [
 export interface ReminderPreferences {
 	enabled: boolean;
 	leadMinutes: number;
+	venueIds?: string[];
 }
 
 export const defaultReminderPreferences: ReminderPreferences = {

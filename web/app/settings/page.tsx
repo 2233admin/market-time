@@ -66,12 +66,14 @@ export default function SettingsPage() {
 	const [notificationPermission, setNotificationPermission] = useState<
 		NotificationPermission | "unsupported"
 	>("unsupported");
+	const [browserZone, setBrowserZone] = useState("UTC");
 	const [preferenceNotice, setPreferenceNotice] = useState<string | null>(null);
 
 	useEffect(() => {
 		setNotificationPermission(
 			"Notification" in window ? Notification.permission : "unsupported",
 		);
+		setBrowserZone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 	}, []);
 
 	useEffect(() => {
@@ -112,10 +114,6 @@ export default function SettingsPage() {
 	const marketCount = new Set([...marketIds, ...connectedIds]).size;
 	const coverage = marketCount ? (connected / marketCount) * 100 : 0;
 	const revision = status?.dataset_revisions.at(-1) ?? "未连接规则集";
-	const browserZone =
-		typeof Intl === "undefined"
-			? "UTC"
-			: Intl.DateTimeFormat().resolvedOptions().timeZone;
 	const zoneOptions = primaryTimeZones.some((zone) => zone.id === browserZone)
 		? primaryTimeZones
 		: [

@@ -1,0 +1,9 @@
+# Keep tracked frontend source and static-export artifacts reproducible on every OS.
+web/**/*.css text eol=lf
+web/**/*.html text eol=lf
+web/**/*.js text eol=lf
+web/**/*.json text eol=lf
+web/**/*.mjs text eol=lf
+web/**/*.ts text eol=lf
+web/**/*.tsx text eol=lf
+web/**/*.txt text eol=lf

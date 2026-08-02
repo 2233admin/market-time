@@ -57,6 +57,10 @@ pub fn app(ruleset: Ruleset) -> Router {
             "/settings",
             get_service(ServeFile::new(web_asset("settings.html"))),
         )
+        .route(
+            "/widget",
+            get_service(ServeFile::new(web_asset("widget.html"))),
+        )
         .nest_service("/_next", ServeDir::new(web_asset("_next")))
         .route("/health", get(health))
         .route("/v1/venues", get(venues))

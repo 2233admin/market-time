@@ -1,0 +1,98 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Build Windows packages
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build static web client
+        shell: pwsh
+        run: |
+          npm ci --prefix web
+          npm run build --prefix web
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
+      - name: Build CLI, server, and Windows installers
+        shell: pwsh
+        run: |
+          cargo build --release -p market-time-cli -p market-time-server
+          cargo tauri build --bundles msi,nsis
+
+      - name: Assemble portable package and checksums
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path $PWD "dist\mark-time-$env:GITHUB_REF_NAME-windows-x86_64"
+          $fixtures = Join-Path $packageRoot "fixtures"
+          New-Item -ItemType Directory -Path $fixtures -Force | Out-Null
+
+          Copy-Item target\release\market-time-desktop.exe $packageRoot
+          Copy-Item target\release\market-time-server.exe $packageRoot
+          Copy-Item target\release\market-time.exe $packageRoot
+          Copy-Item README.md $packageRoot
+          Copy-Item LICENSE-MIT $packageRoot
+          Copy-Item LICENSE-APACHE $packageRoot
+          Copy-Item crates\market-time-data\fixtures\synthetic-venues.json $fixtures
+
+          $archive = "$packageRoot.zip"
+          Compress-Archive -Path "$packageRoot\*" -DestinationPath $archive
+
+          $msi = @(Get-ChildItem target\release\bundle\msi\*.msi)
+          $nsis = @(Get-ChildItem target\release\bundle\nsis\*-setup.exe)
+          if ($msi.Count -ne 1 -or $nsis.Count -ne 1) {
+            throw "Expected exactly one MSI and one NSIS installer."
+          }
+
+          $assets = @($archive, $msi[0].FullName, $nsis[0].FullName)
+          $assets | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($_))"
+          } | Set-Content -Encoding ascii dist\SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(
+            (Get-ChildItem target\release\bundle\msi\*.msi).FullName
+            (Get-ChildItem target\release\bundle\nsis\*-setup.exe).FullName
+            (Get-ChildItem dist\*.zip).FullName
+            (Get-Item dist\SHA256SUMS.txt).FullName
+          )
+
+          if (gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY 2>$null) {
+            gh release upload $env:GITHUB_REF_NAME $assets --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $env:GITHUB_REF_NAME $assets `
+              --verify-tag `
+              --generate-notes `
+              --title "Mark Time $env:GITHUB_REF_NAME" `
+              --repo $env:GITHUB_REPOSITORY
+          }

@@ -1,6 +1,11 @@
 # Mark Time
 
-Open-source, versioned and auditable time infrastructure for global financial markets.
+Open-source, versioned, and auditable time infrastructure for global financial markets — with a
+pure Rust engine, HTTP API, browser board, and an optional Windows desktop widget.
+
+[![CI](https://github.com/2233admin/market-time/actions/workflows/ci.yml/badge.svg)](https://github.com/2233admin/market-time/actions/workflows/ci.yml)
+[![Windows Release](https://github.com/2233admin/market-time/actions/workflows/release.yml/badge.svg)](https://github.com/2233admin/market-time/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/2233admin/market-time?display_name=tag)](https://github.com/2233admin/market-time/releases/latest)
 
 ## What it is
 
@@ -8,14 +13,56 @@ Mark Time answers one question with auditable precision: what time is it, and wh
 open, where. It serves global city clocks, exchange trading sessions and phases, and
 crypto funding and maintenance windows.
 
+The repository currently ships four surfaces over the same rule output:
+
+- **Rust core and CLI** for deterministic phase, timeline, and evidence queries.
+- **HTTP service** for stable `/v1/status`, `/v1/timeline`, and venue catalog contracts.
+- **Browser board** for a global, inspectable trading timetable and evidence settings.
+- **Windows desktop widget** for an always-on-top market snapshot, server-derived countdowns,
+  tray lifecycle, and optional per-market notifications.
+
+The browser and desktop clients do not implement exchange calendars. They display validated
+server answers, freeze the last trusted snapshot when the service is unavailable, and preserve
+`known`/`unknown`, evidence, TZDB, and dataset-revision semantics at the edge.
+
+## Screenshots
+
+### Global market board
+
+![Mark Time global market board showing the server-anchored clock, live-market summary, world map, and server-backed market states](docs/assets/market-time-board.png)
+
+The board combines major financial-city clocks, a live-market relay, a draggable UTC inspection
+axis, server-derived session timelines, and explicit rule coverage. Empty market tracks mean
+"rules not configured" — never an inferred closed state.
+
+### Windows widget and evidence settings
+
+<table>
+  <tr>
+    <td width="38%">
+      <img src="docs/assets/market-time-desktop-widget.png" alt="Always-on-top Mark Time Windows widget with market-local clocks and next-open countdowns">
+    </td>
+    <td width="62%">
+      <img src="docs/assets/market-time-settings.png" alt="Mark Time settings showing reminder controls, TZDB revision, evidence coverage, and dataset revision">
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Desktop widget.</strong> Compact, draggable, always on top, tray-managed, and honest when the service is offline.</td>
+    <td><strong>Settings and evidence.</strong> Time-zone choice, reminder controls, appearance, source coverage, TZDB, and immutable revision identity.</td>
+  </tr>
+</table>
+
+These screenshots use the repository's synthetic demonstration dataset. They do not contain or
+imply redistributed venue schedules.
+
 What sets it apart from an ordinary time/calendar library:
 
 - **Every answer is traceable to dated source evidence.** A session boundary, a holiday,
   a funding window — each one points back to the document it came from and when that
   document was read.
-- **Instants are nanosecond-precision and unambiguous about their frame** — an absolute
-  epoch instant, or a civil time bound to a named zone, never an implicit mixture of the
-  two.
+- **Core instants are nanosecond-precision and unambiguous about their frame** — an absolute epoch
+  instant, or a civil time bound to a named zone, never an implicit mixture of the two. UI clocks
+  render at human scale and make no unsupported accuracy claim.
 - **Uncertainty is stated, not guessed.** Where the data only supports a partial or
   provisional answer, Mark Time says so. Outside its verified coverage, it returns an
   explicit unknown rather than extrapolating a schedule.
@@ -36,12 +83,40 @@ as data.
 
 ## Status
 
-Pre-alpha, and it runs. The phase engine, the timeline query, the dataset loader, the CLI, and
-the board are implemented and tested; what is not here, and never will be, is venue data. The
-specification of this slice is in
+Early-preview MVP, and it runs. The phase engine, timeline query, dataset loader, CLI, HTTP
+service, browser board, and Windows desktop widget are implemented and tested; what is not here,
+and never will be, is venue data. The desktop MVP specification is in
+[`openspec/changes/desktop-widget-mvp/`](openspec/changes/desktop-widget-mvp/), the original venue
+state specification is in
 [`openspec/changes/venue-session-state/`](openspec/changes/venue-session-state/); the research,
 data model, and interface contracts behind it are in
 [`docs/venue-session-state/`](docs/venue-session-state/).
+
+## Download the Windows release
+
+The [latest GitHub Release](https://github.com/2233admin/market-time/releases/latest) contains:
+
+- an MSI installer for managed Windows deployment;
+- an NSIS setup executable for ordinary desktop installation;
+- a portable ZIP with `market-time-desktop.exe`, `market-time-server.exe`,
+  `market-time.exe`, licenses, this README, and the synthetic demonstration fixture.
+
+The installer installs the optional desktop client. The server remains a separate process by
+design, because the widget only consumes stable HTTP rule output and never owns trading-session or
+holiday calculations.
+
+For a self-contained demonstration, extract the portable ZIP and run:
+
+```powershell
+.\market-time-server.exe --dataset .\fixtures\synthetic-venues.json
+```
+
+Then launch `market-time-desktop.exe`. The browser board is available at
+<http://127.0.0.1:8080/>. Replace the synthetic fixture with an operator-owned dataset to answer
+for real venues.
+
+Release binaries are currently unsigned. Windows SmartScreen may therefore ask for confirmation;
+verify the tag, repository, and attached SHA-256 checksum file before running them.
 
 ## Try it
 
@@ -112,6 +187,34 @@ The HTTP shell runs on `axum` and Tokio. It handles requests concurrently with a
 compresses eligible responses, and emits `tower-http` request traces. Set `RUST_LOG` to tune
 logging; for example `RUST_LOG=market_time_server=debug,tower_http=debug`. Ctrl-C and SIGTERM
 stop accepting work and let in-flight responses finish.
+
+### Windows desktop widget
+
+The optional Tauri client loads the static `/widget` page and consumes the same HTTP API. Start
+`market-time-server` on `127.0.0.1:8080`, then build the client:
+
+```powershell
+npm ci --prefix web
+# Optional: keep this exact HTTP(S) origin in the environment for both builds.
+# $env:NEXT_PUBLIC_MARK_TIME_API = "https://market-time.example"
+npm run build --prefix web
+Set-Location desktop
+cargo tauri build --no-bundle
+```
+
+The frameless window stays on top, closes to the tray, and can be shown, hidden, or fully exited
+from the tray menu. It freezes and labels the last snapshot when the HTTP service is unavailable;
+it does not calculate schedules locally. Set `NEXT_PUBLIC_MARK_TIME_API` before the web build to
+target a different HTTP(S) service origin, and keep the same variable set for the Tauri build so
+the desktop content-security policy is pinned to that exact origin.
+
+### Release automation
+
+Pushing a `v*` tag runs [the Windows release workflow](.github/workflows/release.yml) on GitHub
+Actions. It rebuilds the tracked static web export, compiles the CLI, server, and desktop client,
+creates MSI and NSIS installers, assembles the portable ZIP, writes SHA-256 checksums, and attaches
+all assets to the matching GitHub Release. The checked-in version is `0.1.0`, so its release tag is
+`v0.1.0`.
 
 ## Answering for a real venue
 
