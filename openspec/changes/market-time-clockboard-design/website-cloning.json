@@ -1,0 +1,183 @@
+{
+  "schema": "design-pipeline.website-cloning.v1",
+  "changeId": "market-time-clockboard-design",
+  "status": "in-progress",
+  "initializedAt": "2026-08-01T10:59:15.378Z",
+  "artifactRoot": "openspec/changes/market-time-clockboard-design",
+  "targets": [
+    {
+      "id": "127-0-0-1",
+      "url": "http://127.0.0.1:18123/",
+      "role": "primary",
+      "status": "in-progress",
+      "phase": "component-spec-and-build",
+      "artifactRoot": "targets/127-0-0-1"
+    },
+    {
+      "id": "www-jin10-com-activities-global-trading-hours-index-html",
+      "url": "https://www.jin10.com/activities/global_trading_hours/index.html",
+      "role": "reference",
+      "status": "in-progress",
+      "phase": "reconnaissance",
+      "artifactRoot": "targets/www-jin10-com-activities-global-trading-hours-index-html"
+    }
+  ],
+  "fidelity": {
+    "mode": "adaptive",
+    "comparisonPolicy": "Compare each primary target against its own normalized capture; reference targets supply constraints and are not assumed to be direct pixel baselines.",
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "width": 768,
+        "height": 1024
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "gates": {
+      "textCoverage": 1,
+      "assetCoverage": 1,
+      "interactionCoverage": 1,
+      "maxPixelDifferenceRatio": null,
+      "maxLayoutDeltaPx": null
+    }
+  },
+  "referenceMappings": [
+    {
+      "id": "global-dayline",
+      "kind": "supporting",
+      "designRecord": "design.md#global-dayline-mapping",
+      "sourceTargetId": "www-jin10-com-activities-global-trading-hours-index-html",
+      "destinationTargetId": "127-0-0-1",
+      "sourceRegion": "master clock and grouped 24-hour schedule rows",
+      "destinationRegion": "global timetable",
+      "adoptedProperties": [
+        "large master clock",
+        "shared 00-24 ruler",
+        "category headings",
+        "compact venue rows",
+        "phase bars",
+        "current cursor",
+        "right-side status"
+      ],
+      "rejectedProperties": [
+        "brand and copy",
+        "theme switcher",
+        "venue data and schedules",
+        "secondary market-data sections"
+      ],
+      "requiredStates": [
+        "desktop timetable",
+        "390px timetable",
+        "holiday exception",
+        "explicit unknown",
+        "reference-resource failure"
+      ]
+    }
+  ],
+  "ports": {
+    "browser": {
+        "status": "degraded",
+        "adapter": "Codex in-app browser plus recorded manual HTTP/CSS evidence",
+        "availableCapabilities": [
+          "navigate",
+          "report-final-url-status",
+          "screenshot",
+          "record-environment",
+          "record-provenance"
+        ],
+        "lastProbe": {
+          "at": "2026-08-01T11:15:00Z",
+          "ok": true,
+          "message": "Both URLs returned expected titles/status; reference bulk computed-style projection timed out, so inline root CSS plus screenshot quantization is the documented manual palette procedure."
+        },
+      "requiredCapabilities": [
+        "navigate",
+        "report-final-url-status",
+        "set-viewport",
+        "set-device-scale",
+        "screenshot",
+        "evaluate",
+        "scroll",
+        "click",
+        "hover",
+        "focus",
+        "type",
+        "resize",
+        "wait-for-fonts",
+        "wait-for-page-ready",
+        "record-environment",
+        "record-provenance"
+      ]
+    },
+    "builder": {
+        "status": "ready",
+        "adapter": "Codex direct local executor",
+        "availableCapabilities": [
+          "read-spec",
+          "read-evidence",
+          "write-files",
+          "run-project-checks"
+        ],
+        "lastProbe": {
+          "at": "2026-08-01T11:15:00Z",
+          "ok": true,
+          "message": "Component contract, palette evidence, target files, and project checks are locally accessible."
+        },
+      "requiredCapabilities": [
+        "read-spec",
+        "read-evidence",
+        "write-files",
+        "run-project-checks"
+      ]
+    },
+    "evidence": {
+        "status": "degraded",
+        "adapter": "Codex in-app browser manual responsive and state comparison",
+        "availableCapabilities": [
+          "render-reference",
+          "render-implementation",
+          "content-diff",
+          "responsive-diff",
+          "state-diff",
+          "interaction-replay",
+          "mapped-interaction-replay",
+          "record-evidence-provenance"
+        ],
+        "lastProbe": {
+          "at": "2026-08-01T11:15:00Z",
+          "ok": true,
+          "message": "Manual adaptive comparison is available; pixel and layout thresholds are intentionally null."
+        },
+      "requiredCapabilities": [
+        "render-reference",
+        "render-implementation",
+        "content-diff",
+        "responsive-diff",
+        "state-diff",
+        "interaction-replay",
+        "mapped-interaction-replay",
+        "record-evidence-provenance"
+      ]
+    }
+  },
+  "verification": {
+    "status": "not-run",
+    "evaluatedAt": null,
+    "reportPath": null,
+    "reasons": []
+  },
+  "protocol": [
+    "preflight",
+    "reconnaissance",
+    "foundation",
+    "component-spec-and-build",
+    "assembly",
+    "visual-and-interaction-qa"
+  ]
+}

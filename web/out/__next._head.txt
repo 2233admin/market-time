@@ -1,0 +1,5 @@
+1:"$Sreact.fragment"
+2:I[90704,["/_next/static/chunks/4444n6gjkife7.js","/_next/static/chunks/0x7grh4ah-8ea.js"],"ViewportBoundary"]
+3:I[90704,["/_next/static/chunks/4444n6gjkife7.js","/_next/static/chunks/0x7grh4ah-8ea.js"],"MetadataBoundary"]
+4:"$Sreact.suspense"
+0:{"rsc":["$","$1","h",{"children":[null,["$","$L2",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}],["$","meta","2",{"name":"theme-color","content":"#0b1018","media":"(prefers-color-scheme: dark)"}],["$","meta","3",{"name":"theme-color","content":"#eef1f4","media":"(prefers-color-scheme: light)"}],["$","meta","4",{"name":"color-scheme","content":"dark light"}]]}],["$","div",null,{"hidden":true,"children":["$","$L3",null,{"children":["$","$4",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"MARK / TIME — 全球交易时间表"}],["$","meta","1",{"name":"description","content":"用同一个绝对时刻查看全球交易场所的当地时间、交易状态与下一次开收盘。"}]]}]}]}],null]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"dKZw5yzrGWkZZuCDUvWsP"}

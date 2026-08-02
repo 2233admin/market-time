@@ -33,6 +33,7 @@ desktop.ini
 # committed: they are regenerable and agent-specific rather than project content.
 .claude/
 .codex/
+.design-pipeline/
 
 # =============================================================================
 # Local environment / secrets
@@ -49,6 +50,12 @@ desktop.ini
 # that fetched data must stay untracked.
 /data/cache/
 .gstack/
+
+# Next.js frontend dependencies and local compiler caches. The static export in
+# web/out is intentionally tracked so the Rust binary can serve a fresh clone.
+/web/node_modules/
+/web/.next/
+/web/*.tsbuildinfo
 
 # Sentrux rules and their reviewed structural baseline govern this repository.
 # The user-level Git ignore treats .sentrux as local by default; keep this project's

@@ -85,6 +85,116 @@ async fn status_exposes_calendar_exceptions_from_the_core() {
 }
 
 #[tokio::test]
+async fn timeline_exposes_one_utc_day_of_core_segments() {
+    let (status, _, body) = send(
+        app(ruleset()),
+        Method::GET,
+        "/v1/timeline?at=2026-07-30T02%3A00%3A00Z",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["at"], "2026-07-30T02:00:00Z");
+    assert_eq!(body["interval"]["start"], "2026-07-30T00:00:00Z");
+    assert_eq!(body["interval"]["end"], "2026-07-31T00:00:00Z");
+    assert_eq!(body["interval"]["axis_zone"], "UTC");
+
+    let venues = body["venues"].as_array().expect("venues are returned");
+    assert_eq!(venues.len(), 3);
+    assert!(venues.iter().all(|venue| venue["tiles_interval"] == true));
+
+    let auction = venues
+        .iter()
+        .find(|venue| venue["id"] == "SYNTH-AUCT")
+        .expect("auction venue is returned");
+    let segments = auction["segments"]
+        .as_array()
+        .expect("timeline segments are returned");
+    assert!(segments.iter().any(|segment| {
+        segment["status"] == "known"
+            && segment["phase"] == "continuous_trading"
+            && segment["current"] == true
+            && segment["calendar"]["kind"] == "weekly_pattern"
+    }));
+    assert_eq!(auction["trading_windows"].as_array().map(Vec::len), Some(2));
+    assert_eq!(auction["next_trading_transition"]["kind"], "closes");
+    assert_eq!(
+        auction["next_trading_transition"]["at"],
+        "2026-07-30T03:30:00Z"
+    );
+
+    let always_on = venues
+        .iter()
+        .find(|venue| venue["id"] == "SYNTH-ALWAYS")
+        .expect("always-on venue is returned");
+    assert!(always_on["next_trading_transition"].is_null());
+}
+
+#[tokio::test]
+async fn timeline_keeps_unknown_distinct_from_closed() {
+    let (status, _, body) = send(
+        app(ruleset()),
+        Method::GET,
+        "/v1/timeline?at=2030-01-01T00%3A00%3A00Z",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["venues"].as_array().is_some_and(|venues| {
+        venues.iter().all(|venue| {
+            let no_transition = venue["next_trading_transition"].is_null();
+            let no_window = venue["next_trading_window"].is_null();
+            venue["segments"].as_array().is_some_and(|segments| {
+                segments
+                    .iter()
+                    .all(|segment| segment["status"] == "unknown" && segment["phase"].is_null())
+            }) && no_transition
+                && no_window
+        })
+    }));
+
+    for uri in [
+        "/v1/timeline?at=not-a-time",
+        "/v1/timeline?extra=value",
+        "/v1/timeline?at=2026-07-30T02%3A00%3A00Z&at=2026-07-30T03%3A00%3A00Z",
+    ] {
+        let (status, _, body) = send(app(ruleset()), Method::GET, uri).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].is_string());
+    }
+}
+
+#[tokio::test]
+async fn timeline_reports_the_next_trading_change_not_the_day_clip() {
+    let (status, _, body) = send(
+        app(ruleset()),
+        Method::GET,
+        "/v1/timeline?at=2026-08-01T03%3A00%3A00Z",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let auction = body["venues"]
+        .as_array()
+        .and_then(|venues| venues.iter().find(|venue| venue["id"] == "SYNTH-AUCT"))
+        .expect("auction venue is returned");
+    assert_eq!(auction["segments"][0]["end"], "2026-08-02T00:00:00Z");
+    assert_eq!(auction["next_trading_transition"]["kind"], "opens");
+    assert_eq!(
+        auction["next_trading_transition"]["at"],
+        "2026-08-03T01:25:00Z"
+    );
+    assert_eq!(
+        auction["next_trading_window"]["start"],
+        "2026-08-03T01:25:00Z"
+    );
+    assert_eq!(
+        auction["next_trading_window"]["end"],
+        "2026-08-03T03:30:00Z"
+    );
+}
+
+#[tokio::test]
 async fn frontend_is_served_without_relaxing_api_route_errors() {
     let response = app(ruleset())
         .oneshot(
@@ -109,7 +219,39 @@ async fn frontend_is_served_without_relaxing_api_route_errors() {
     assert!(
         String::from_utf8(body.to_vec())
             .expect("HTML is UTF-8")
-            .contains("MARK / TIME")
+            .contains("data-ui-framework=\"next-appica\"")
+    );
+
+    let audit = app(ruleset())
+        .oneshot(
+            Request::builder()
+                .uri("/audit")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("router is infallible");
+    assert_eq!(audit.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        audit.headers()[header::LOCATION],
+        "/settings#source-intelligence"
+    );
+
+    let settings = app(ruleset())
+        .oneshot(
+            Request::builder()
+                .uri("/settings")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("router is infallible");
+    assert_eq!(settings.status(), StatusCode::OK);
+    assert!(
+        settings.headers()[header::CONTENT_TYPE]
+            .to_str()
+            .expect("content type is ASCII")
+            .starts_with("text/html")
     );
 }
 

@@ -6,10 +6,13 @@
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::{Query, State, rejection::QueryRejection};
 use axum::http::{HeaderName, Method, Request as HttpRequest, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, get_service};
 use axum::{BoxError, Json, Router};
-use market_time_core::{EvidenceRef, PhaseOutcome, Ruleset, UtcInstant, resolve_phases, tzdata};
+use market_time_core::{
+    EvidenceRef, Interval, NANOS_PER_SECOND, PhaseOutcome, Ruleset, TimelineSegment, UtcInstant,
+    resolve_phases, resolve_timeline, tzdata,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -26,6 +29,7 @@ use tower_http::trace::{DefaultOnResponse, TraceLayer};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_IN_FLIGHT: usize = 256;
+const UTC_DAY_NANOS: i128 = 86_400 * NANOS_PER_SECOND;
 
 #[derive(Clone)]
 struct AppState {
@@ -44,14 +48,20 @@ pub fn app(ruleset: Ruleset) -> Router {
         ruleset: Arc::new(ruleset),
     };
     let routes = Router::new()
+        .route("/", get_service(ServeFile::new(web_asset("index.html"))))
         .route(
-            "/",
-            get_service(ServeFile::new(frontend_asset("index.html"))),
+            "/audit",
+            get(|| async { Redirect::permanent("/settings#source-intelligence") }),
         )
-        .nest_service("/assets", ServeDir::new(frontend_asset("assets")))
+        .route(
+            "/settings",
+            get_service(ServeFile::new(web_asset("settings.html"))),
+        )
+        .nest_service("/_next", ServeDir::new(web_asset("_next")))
         .route("/health", get(health))
         .route("/v1/venues", get(venues))
         .route("/v1/status", get(statuses))
+        .route("/v1/timeline", get(timelines))
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state);
@@ -59,10 +69,169 @@ pub fn app(ruleset: Ruleset) -> Router {
     production_layers(routes, REQUEST_TIMEOUT)
 }
 
-fn frontend_asset(name: &str) -> PathBuf {
+async fn timelines(
+    State(state): State<AppState>,
+    query: Result<Query<StatusQuery>, QueryRejection>,
+) -> Response {
+    let Query(query) = match query {
+        Ok(query) => query,
+        Err(rejection) => return error(StatusCode::BAD_REQUEST, rejection.body_text()),
+    };
+    let (at, supplied) = match requested_instant(query.at.as_deref()) {
+        Ok(result) => result,
+        Err(message) => return error(StatusCode::BAD_REQUEST, message),
+    };
+    let day_start_nanos = at.as_nanos_since_unix_epoch().div_euclid(UTC_DAY_NANOS) * UTC_DAY_NANOS;
+    let interval = Interval::new(
+        UtcInstant::from_nanos_since_unix_epoch(day_start_nanos),
+        UtcInstant::from_nanos_since_unix_epoch(day_start_nanos + UTC_DAY_NANOS),
+    )
+    .expect("one UTC day is a valid interval");
+
+    let venues: Vec<Value> = state
+        .ruleset
+        .venues()
+        .into_iter()
+        .map(|venue| {
+            let timeline = resolve_timeline(interval, &venue, &state.ruleset);
+            let profile = state.ruleset.profile(&venue);
+            let label = profile.map_or_else(
+                || venue.as_str().to_owned(),
+                |profile| profile.label(venue.as_str()).to_owned(),
+            );
+            let rules = state.ruleset.venue(&venue);
+            let (next_trading_transition, next_trading_window) =
+                upcoming_trading(at, &venue, &state.ruleset);
+
+            json!({
+                "id": venue.as_str(),
+                "display_name": label,
+                "location": profile.and_then(|profile| profile.location.as_deref()),
+                "home_zone": rules.map(|rules| rules.home_zone.as_str()),
+                "family": profile.and_then(|profile| profile.family.map(market_time_core::AssetFamily::as_str)),
+                "tiles_interval": timeline.tiles_interval(),
+                "next_trading_transition": next_trading_transition,
+                "next_trading_window": next_trading_window,
+                "trading_windows": trading_window_values(&timeline.segments),
+                "segments": timeline
+                    .segments
+                    .iter()
+                    .map(|segment| timeline_segment_value(segment, at, interval))
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    success(json!({
+        "at": at.to_string(),
+        "clock": clock_value(supplied),
+        "interval": {
+            "start": interval.start.to_string(),
+            "end": interval.end.to_string(),
+            "axis_zone": "UTC",
+        },
+        "tzdb_version": tzdata::iana_tzdb_version(),
+        "dataset_revisions": revision_ids(&state.ruleset),
+        "venues": venues,
+    }))
+}
+
+fn upcoming_trading(
+    at: UtcInstant,
+    venue: &market_time_core::VenueId,
+    ruleset: &Ruleset,
+) -> (Option<Value>, Option<Value>) {
+    let Some(coverage) = ruleset.venue(venue).map(|rules| rules.coverage.interval()) else {
+        return (None, None);
+    };
+    let Ok(search) = Interval::new(at, coverage.end) else {
+        return (None, None);
+    };
+    let timeline = resolve_timeline(search, venue, ruleset);
+    let current_trading = timeline.segments.iter().find_map(|segment| match segment {
+        TimelineSegment::Phase { interval, answer } if interval.contains(at) => {
+            Some(answer.phase.is_trading())
+        }
+        _ => None,
+    });
+
+    let transition = current_trading.and_then(|current_trading| {
+        timeline.segments.iter().find_map(|segment| match segment {
+            TimelineSegment::Phase { interval, answer }
+                if interval.start > at && answer.phase.is_trading() != current_trading =>
+            {
+                Some(json!({
+                    "at": interval.start.to_string(),
+                    "kind": if answer.phase.is_trading() { "opens" } else { "closes" },
+                    "phase": answer.phase.as_str(),
+                }))
+            }
+            _ => None,
+        })
+    });
+
+    let mut window: Option<(UtcInstant, UtcInstant)> = None;
+    for segment in &timeline.segments {
+        let TimelineSegment::Phase { interval, answer } = segment else {
+            if window.is_some() {
+                break;
+            }
+            continue;
+        };
+        if !answer.phase.is_trading() {
+            if window.is_some() {
+                break;
+            }
+            continue;
+        }
+        if let Some((_, end)) = &mut window {
+            if *end != interval.start {
+                break;
+            }
+            *end = interval.end;
+        } else {
+            window = Some((interval.start, interval.end));
+        }
+    }
+
+    let window = window.map(|(start, end)| {
+        json!({
+            "start": start.to_string(),
+            "end": end.to_string(),
+        })
+    });
+
+    (transition, window)
+}
+
+fn trading_window_values(segments: &[TimelineSegment]) -> Vec<Value> {
+    let mut windows: Vec<(UtcInstant, UtcInstant)> = Vec::new();
+    for segment in segments {
+        let TimelineSegment::Phase { interval, answer } = segment else {
+            continue;
+        };
+        if !answer.phase.is_trading() {
+            continue;
+        }
+        if let Some((_, end)) = windows.last_mut()
+            && *end == interval.start
+        {
+            *end = interval.end;
+            continue;
+        }
+        windows.push((interval.start, interval.end));
+    }
+    windows
+        .into_iter()
+        .map(|(start, end)| json!({"start": start.to_string(), "end": end.to_string()}))
+        .collect()
+}
+
+fn web_asset(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("frontend")
+        .join("web")
+        .join("out")
         .join(name)
 }
 
@@ -178,18 +347,69 @@ async fn statuses(
 
     success(json!({
         "at": at.to_string(),
-        "clock": if supplied {
-            json!({"discipline": "supplied"})
-        } else {
-            json!({
-                "discipline": "unmeasured",
-                "source": "host system clock; no NTP or PTP bound available to this process",
-            })
-        },
+        "clock": clock_value(supplied),
         "tzdb_version": tzdata::iana_tzdb_version(),
         "dataset_revisions": revision_ids(&state.ruleset),
         "venues": answers,
     }))
+}
+
+fn timeline_segment_value(segment: &TimelineSegment, at: UtcInstant, axis: Interval) -> Value {
+    match segment {
+        TimelineSegment::Phase { interval, answer } => json!({
+            "start": interval.start.to_string(),
+            "end": interval.end.to_string(),
+            "position": segment_position(*interval, axis),
+            "status": "known",
+            "phase": answer.phase.as_str(),
+            "trading": answer.phase.is_trading(),
+            "current": interval.contains(at),
+            "calendar": {
+                "kind": answer.calendar_rule_kind,
+                "label": answer.calendar_label,
+            },
+            "boundary_uncertainty": {
+                "start": answer.boundary_start.uncertainty.to_string(),
+                "end": answer.boundary_end.uncertainty.to_string(),
+            },
+            "events": answer.events.iter().map(event_value).collect::<Vec<_>>(),
+        }),
+        TimelineSegment::Unknown { interval, gap } => json!({
+            "start": interval.start.to_string(),
+            "end": interval.end.to_string(),
+            "position": segment_position(*interval, axis),
+            "status": "unknown",
+            "phase": Value::Null,
+            "trading": Value::Null,
+            "current": interval.contains(at),
+            "reason": gap.describe(),
+            "coverage": gap.coverage.as_ref().map(|coverage| json!({
+                "start": coverage.start().to_string(),
+                "end": coverage.end().to_string(),
+            })),
+        }),
+    }
+}
+
+fn segment_position(segment: Interval, axis: Interval) -> Value {
+    let span = axis.start.saturating_nanos_until(axis.end);
+    let start = axis.start.saturating_nanos_until(segment.start) * 1_000_000 / span;
+    let end = axis.start.saturating_nanos_until(segment.end) * 1_000_000 / span;
+    json!({
+        "start_millionths": u32::try_from(start.clamp(0, 1_000_000)).expect("clamped position fits u32"),
+        "end_millionths": u32::try_from(end.clamp(0, 1_000_000)).expect("clamped position fits u32"),
+    })
+}
+
+fn clock_value(supplied: bool) -> Value {
+    if supplied {
+        json!({"discipline": "supplied"})
+    } else {
+        json!({
+            "discipline": "unmeasured",
+            "source": "host system clock; no NTP or PTP bound available to this process",
+        })
+    }
 }
 
 fn requested_instant(at: Option<&str>) -> Result<(UtcInstant, bool), String> {

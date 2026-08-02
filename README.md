@@ -81,7 +81,16 @@ uncertainty on each boundary. `market-time timeline` prints the segments a board
 from, including the stretches that fall outside coverage — those come back as "not known", never
 as a schedule someone extrapolated.
 
-To serve the same answers over HTTP, start the thin service shell with an operator dataset:
+The browser board is a Next.js 16 static export using Appica UI. Build it once after changing
+`web/`; the generated `web/out` is served by the Rust process and intentionally tracked so a
+fresh binary checkout has a usable board:
+
+```bash
+npm ci --prefix web
+npm run build --prefix web
+```
+
+Then start the thin service shell with an operator dataset:
 
 ```bash
 cargo run -p market-time-server -- --dataset crates/market-time-data/fixtures/synthetic-venues.json
@@ -92,13 +101,11 @@ It listens on `127.0.0.1:8080` by default. `GET /health` reports loaded revision
 host-clock instant. Supply a replayable instant with
 `GET /v1/status?at=2026-07-30T02:00:00Z`.
 
-The same process serves the browser board at <http://127.0.0.1:8080/>. It is a responsive
-global clockboard: browser clocks update every second, while phase, current service-defined
-boundary, calendar exception, event, evidence, uncertainty, coverage, and dataset revision are
-always read from `/v1/status`. A known calendar exception is returned as
-`calendar.kind` / `calendar.label`; coverage gaps stay `status: "unknown"`, never a client-side
-guess that the venue is closed. Use the UTC inspection control in the board to replay a calendar
-instant such as `2026-10-01T02:00:00Z` against the server.
+The same process serves the browser board at <http://127.0.0.1:8080/>. It is a responsive global
+trading timetable: browser clocks update every second, while complete day segments, current phase,
+next trading transition, calendar exception, unknown coverage, and dataset revision are always read
+from `/v1/timeline`. Drag either UTC ruler to inspect another instant; time preferences, appearance,
+evidence, and revisions are consolidated at `/settings`. The legacy `/audit` URL redirects there.
 
 The HTTP shell runs on `axum` and Tokio. It handles requests concurrently with a process-wide
 256-request ceiling, applies a 10-second timeout, returns an `x-request-id`, allows browser GETs,

@@ -1,0 +1,54 @@
+{
+  "schema": "design-pipeline.palette-evidence.v1",
+  "targetId": "www-jin10-com-activities-global-trading-hours-index-html",
+  "sourceUrl": "https://www.jin10.com/activities/global_trading_hours/index.html",
+  "status": "ready",
+  "capturedAt": "2026-08-01T11:15:00Z",
+  "sources": {
+    "domComputed": {
+      "status": "ready",
+      "evidencePaths": ["dom-colors.md"],
+      "colors": [
+        {"hex": "#0F1117", "role": "page-ground", "region": "dark-theme body"},
+        {"hex": "#181B23", "role": "card", "region": "dark-theme cards"},
+        {"hex": "#E8EAF0", "role": "primary-text", "region": "dark-theme primary copy"},
+        {"hex": "#F08A63", "role": "time-needle", "region": "current-time cursor"}
+      ]
+    },
+    "rasterMedia": {
+      "status": "ready",
+      "evidencePaths": ["raster-colors.md"],
+      "regions": ["page ground", "schedule cards", "row and divider field"],
+      "colors": [
+        {"hex": "#0F1117", "role": "page-ground", "region": "dominant full-page field"},
+        {"hex": "#181B23", "role": "card", "region": "schedule cards"},
+        {"hex": "#1A1D26", "role": "row-field", "region": "timeline rows"},
+        {"hex": "#2C2E3F", "role": "divider", "region": "rules and secondary fields"}
+      ]
+    }
+  },
+  "semanticRoles": [
+    {"role": "page-ground", "sourceColor": "#0F1117", "targetToken": "--mt-bg"},
+    {"role": "card", "sourceColor": "#181B23", "targetToken": "--mt-card"},
+    {"role": "primary-text", "sourceColor": "#E8EAF0", "targetToken": "--mt-text"},
+    {"role": "time-needle", "sourceColor": "#F08A63", "targetToken": "--mt-needle"}
+  ],
+  "relationships": {
+    "coverage": [
+      {"role": "page-ground", "min": 0.28, "max": 0.5},
+      {"role": "card", "min": 0.3, "max": 0.55},
+      {"role": "primary-text", "min": 0.01, "max": 0.06},
+      {"role": "time-needle", "min": 0.001, "max": 0.015}
+    ],
+    "luminanceHierarchy": ["near-black ground", "cards one step lighter", "primary text high contrast", "needle bright but spatially sparse"],
+    "saturationPosture": "mostly neutral and low-saturation with semantic bars and cursor accents",
+    "temperaturePosture": "cool neutral base with a warm orange time needle"
+  },
+  "targetProjectTokens": [
+    {"token": "--mt-bg", "value": "#0F1117", "sourceRole": "page-ground"},
+    {"token": "--mt-card", "value": "#181B23", "sourceRole": "card"},
+    {"token": "--mt-text", "value": "#E8EAF0", "sourceRole": "primary-text"},
+    {"token": "--mt-needle", "value": "#F08A63", "sourceRole": "time-needle"}
+  ],
+  "notes": ["Adaptive use preserves topology and semantic relationships, not reference branding or data.", "Bulk browser computed-style projection timed out; authored root declarations and screenshot quantization form the recorded manual evidence path."]
+}

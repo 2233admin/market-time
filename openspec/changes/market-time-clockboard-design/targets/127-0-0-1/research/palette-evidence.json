@@ -1,0 +1,54 @@
+{
+  "schema": "design-pipeline.palette-evidence.v1",
+  "targetId": "127-0-0-1",
+  "sourceUrl": "http://127.0.0.1:18123/",
+  "status": "ready",
+  "capturedAt": "2026-08-01T11:15:00Z",
+  "sources": {
+    "domComputed": {
+      "status": "ready",
+      "evidencePaths": ["dom-colors.md"],
+      "colors": [
+        {"hex": "#090D18", "role": "page-ground", "region": "body"},
+        {"hex": "#101827", "role": "panel", "region": "market horizon"},
+        {"hex": "#E7EDF7", "role": "primary-text", "region": "headings and clock"},
+        {"hex": "#FFB35C", "role": "time-signal", "region": "cursor and controls"}
+      ]
+    },
+    "rasterMedia": {
+      "status": "ready",
+      "evidencePaths": ["raster-colors.md"],
+      "regions": ["page ground", "market panel", "row field", "map and rules"],
+      "colors": [
+        {"hex": "#101827", "role": "panel", "region": "dominant market panel"},
+        {"hex": "#090D18", "role": "page-ground", "region": "outer page"},
+        {"hex": "#141C2B", "role": "raised-row", "region": "venue rows"},
+        {"hex": "#535A61", "role": "orientation-rule", "region": "map and dividers"}
+      ]
+    }
+  },
+  "semanticRoles": [
+    {"role": "page-ground", "sourceColor": "#090D18", "targetToken": "--mt-bg"},
+    {"role": "panel", "sourceColor": "#101827", "targetToken": "--mt-card"},
+    {"role": "primary-text", "sourceColor": "#E7EDF7", "targetToken": "--mt-text"},
+    {"role": "time-signal", "sourceColor": "#FFB35C", "targetToken": "--mt-needle"}
+  ],
+  "relationships": {
+    "coverage": [
+      {"role": "page-ground", "min": 0.18, "max": 0.32},
+      {"role": "panel", "min": 0.45, "max": 0.72},
+      {"role": "primary-text", "min": 0.02, "max": 0.08},
+      {"role": "time-signal", "min": 0.001, "max": 0.02}
+    ],
+    "luminanceHierarchy": ["primary text is brightest", "signal is warm and isolated", "panel separates subtly from page ground"],
+    "saturationPosture": "low-saturation blue-black surfaces with sparse semantic colour",
+    "temperaturePosture": "cool neutral field with one warm time-reference signal"
+  },
+  "targetProjectTokens": [
+    {"token": "--mt-bg", "value": "#0F1117", "sourceRole": "page-ground"},
+    {"token": "--mt-card", "value": "#181B23", "sourceRole": "panel"},
+    {"token": "--mt-text", "value": "#E8EAF0", "sourceRole": "primary-text"},
+    {"token": "--mt-needle", "value": "#F08A63", "sourceRole": "time-signal"}
+  ],
+  "notes": ["Adaptive mapping preserves role and contrast hierarchy while correcting the homepage information architecture."]
+}

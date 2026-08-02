@@ -1,0 +1,106 @@
+{
+  "blockers": [],
+  "changeId": "market-time-clockboard-design",
+  "evidence": [
+    "openspec/changes/market-time-clockboard-design/decisions/grill.md",
+    "openspec/changes/market-time-clockboard-design/qa.md",
+    "openspec/changes/market-time-clockboard-design/design.md",
+    "openspec/changes/market-time-clockboard-design/motion.md",
+    "openspec/changes/market-time-clockboard-design/tasks.md",
+    "Jin10 reference screenshot captured locally on 2026-08-01; source decisions recorded in DESIGN.md and decisions/grill.md.",
+    "Real Chrome covered normal, holiday, unknown, stale, focus restore, 390px reduced-motion, and world-map resource failure; node check, diff check, fmt, 118 Rust tests, clippy, and build passed.",
+    "Reviewer found no critical/high/medium blocker. Real Chrome verified mid-day-break and post-close bar colours, non-zero nanosecond precision fallback, and the repaired disclosure title."
+  ],
+  "extensions": {
+    "legacy": {
+      "artifactRoot": "openspec/changes/market-time-clockboard-design",
+      "capabilities": {
+        "fallbacks": [],
+        "missing": []
+      },
+      "decisions": [
+        "Treat reference sites and DESIGN.md templates as attributed evidence, not product authority"
+      ],
+      "designSynthesis": {
+        "manifest": "openspec/changes/market-time-clockboard-design/design-synthesis.json",
+        "output": "DESIGN.md",
+        "stage": "design-validation",
+        "status": "needs-review"
+      },
+      "gbrain": {
+        "detected": false,
+        "paths": [],
+        "syncPlanned": false
+      },
+      "motion": {
+        "implementationLibrary": "unknown",
+        "motionSpec": "openspec/changes/market-time-clockboard-design/motion.md",
+        "reducedMotion": "pending",
+        "required": false
+      },
+      "openSpec": {
+        "changeId": "market-time-clockboard-design",
+        "detected": true,
+        "paths": [
+          "openspec/changes/market-time-clockboard-design"
+        ]
+      },
+      "projectRoot": ".",
+      "qa": {
+        "evidenceRoot": "openspec/changes/market-time-clockboard-design/qa.md",
+        "scores": {},
+        "status": "not-run"
+      },
+      "surfaces": [
+        "DESIGN.md"
+      ]
+    },
+    "legacyEvents": {
+      "count": 4,
+      "sha256": "f9543fa254e0d062de6850063213a2eb6a7c3a7e06fdf9b648daee160ab2b6d8"
+    },
+    "legacyStatus": "needs-review",
+    "unknown": {}
+  },
+  "foundations": {
+    "design": {
+      "path": "DESIGN.md",
+      "sha256": "29c9b5b4c2400010fc8c9256bec96843c9f3563c1d726b0247deca315415062d",
+      "status": "ready",
+      "validator": "designer-pipeline foundation check --kind design"
+    },
+    "motion": {
+      "path": "MOTION.md",
+      "sha256": "9f8fa47493b93ff11767f09a63f4283ad4cd039a31970dbc5908cdf42755fe76",
+      "status": "ready",
+      "validator": "designer-pipeline foundation check --kind motion"
+    }
+  },
+  "lastEventSeq": 11,
+  "migration": {
+    "sourceNextField": "nextActions",
+    "sourcePhaseField": "phase",
+    "sourceSchema": "design-pipeline.state.v1",
+    "sourceSha256": "f8cba8aca490d810cc8482f0100a9204ec94c940d94056fd6fc2977725623bf4",
+    "sourceStatus": "needs-review"
+  },
+  "nextActions": [
+    "Retain the visible local preview and verification evidence; do not commit, push, release, or deploy without separate authorization.",
+    "Verify authorization and browser capabilities for every target",
+    "Capture reconnaissance evidence for 127-0-0-1"
+  ],
+  "phase": "verification",
+  "registryVersion": "design-pipeline.phases.v2",
+  "revision": 11,
+  "sceneRuntime": null,
+  "schema": "design-pipeline.state.v2",
+  "status": "verifying",
+  "updatedAt": "2026-08-01T10:59:15.378Z",
+  "surfaces": [
+    "127-0-0-1",
+    "www-jin10-com-activities-global-trading-hours-index-html"
+  ],
+  "decisions": [
+    "Use isolated evidence and research artifacts for every normalized target URL"
+  ]
+}
