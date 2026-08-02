@@ -15,7 +15,7 @@ use market_time_core::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tower::ServiceBuilder;
@@ -232,6 +232,18 @@ fn trading_window_values(segments: &[TimelineSegment]) -> Vec<Value> {
 }
 
 fn web_asset(name: &str) -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|executable| packaged_web_asset(&executable, name))
+        .unwrap_or_else(|| workspace_web_asset(name))
+}
+
+fn packaged_web_asset(executable: &Path, name: &str) -> Option<PathBuf> {
+    let asset = executable.parent()?.join("web").join("out").join(name);
+    asset.exists().then_some(asset)
+}
+
+fn workspace_web_asset(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("web")
@@ -557,5 +569,28 @@ mod tests {
 
         assert_eq!(status, StatusCode::REQUEST_TIMEOUT);
         assert_eq!(json["error"], "request timed out");
+    }
+
+    #[test]
+    fn a_portable_server_reads_web_assets_beside_the_executable() {
+        let root = std::env::temp_dir().join(format!(
+            "market-time-server-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("the system clock is after the Unix epoch")
+                .as_nanos()
+        ));
+        let asset = root.join("web").join("out").join("index.html");
+        std::fs::create_dir_all(asset.parent().expect("the asset has a parent"))
+            .expect("the portable web directory is created");
+        std::fs::write(&asset, b"portable").expect("the test asset is written");
+
+        assert_eq!(
+            packaged_web_asset(&root.join("market-time-server.exe"), "index.html"),
+            Some(asset)
+        );
+
+        std::fs::remove_dir_all(root).expect("the test directory is removed");
     }
 }

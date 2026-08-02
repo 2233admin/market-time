@@ -2144,7 +2144,7 @@ dependencies = [
 
 [[package]]
 name = "market-time-board"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "jiff",
  "market-time-core",
@@ -2153,7 +2153,7 @@ dependencies = [
 
 [[package]]
 name = "market-time-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "jiff",
  "market-time-board",
@@ -2164,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "market-time-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "jiff",
  "jiff-tzdb",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "market-time-data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "jiff",
  "market-time-core",
@@ -2183,7 +2183,7 @@ dependencies = [
 
 [[package]]
 name = "market-time-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tauri",
  "tauri-build",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "market-time-scales"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hifitime",
  "market-time-core",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "market-time-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "jiff",

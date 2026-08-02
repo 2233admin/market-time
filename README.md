@@ -99,7 +99,8 @@ The [latest GitHub Release](https://github.com/2233admin/market-time/releases/la
 - an MSI installer for managed Windows deployment;
 - an NSIS setup executable for ordinary desktop installation;
 - a portable ZIP with `market-time-desktop.exe`, `market-time-server.exe`,
-  `market-time.exe`, licenses, this README, and the synthetic demonstration fixture.
+  `market-time.exe`, the browser assets, licenses, this README, and the synthetic demonstration
+  fixture.
 
 The installer installs the optional desktop client. The server remains a separate process by
 design, because the widget only consumes stable HTTP rule output and never owns trading-session or
@@ -213,8 +214,8 @@ the desktop content-security policy is pinned to that exact origin.
 Pushing a `v*` tag runs [the Windows release workflow](.github/workflows/release.yml) on GitHub
 Actions. It rebuilds the tracked static web export, compiles the CLI, server, and desktop client,
 creates MSI and NSIS installers, assembles the portable ZIP, writes SHA-256 checksums, and attaches
-all assets to the matching GitHub Release. The checked-in version is `0.1.0`, so its release tag is
-`v0.1.0`.
+all assets to the matching GitHub Release. The checked-in version is `0.1.1`, so its release tag is
+`v0.1.1`.
 
 ## Answering for a real venue
 

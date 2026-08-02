@@ -50,7 +50,9 @@ jobs:
         run: |
           $packageRoot = Join-Path $PWD "dist\mark-time-$env:GITHUB_REF_NAME-windows-x86_64"
           $fixtures = Join-Path $packageRoot "fixtures"
+          $webRoot = Join-Path $packageRoot "web\out"
           New-Item -ItemType Directory -Path $fixtures -Force | Out-Null
+          New-Item -ItemType Directory -Path $webRoot -Force | Out-Null
 
           Copy-Item target\release\market-time-desktop.exe $packageRoot
           Copy-Item target\release\market-time-server.exe $packageRoot
@@ -59,6 +61,7 @@ jobs:
           Copy-Item LICENSE-MIT $packageRoot
           Copy-Item LICENSE-APACHE $packageRoot
           Copy-Item crates\market-time-data\fixtures\synthetic-venues.json $fixtures
+          Copy-Item web\out\* $webRoot -Recurse
 
           $archive = "$packageRoot.zip"
           Compress-Archive -Path "$packageRoot\*" -DestinationPath $archive
