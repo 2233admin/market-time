@@ -15,6 +15,37 @@ fn fixture() -> String {
         .to_string()
 }
 
+/// A one-venue dataset that declares no `bands` array at all — just enough scaffolding to
+/// load, with nothing for the `bands` command to derive.
+fn dataset_with_no_bands() -> String {
+    r#"{
+      "revisions": [{"id": "r1", "assembled_at": "2026-01-01T00:00:00Z"}],
+      "venues": [
+        {
+          "venue": "V1", "home_zone": "UTC",
+          "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-01-08T00:00:00Z"},
+          "rules": [{
+            "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+            "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+            "applies": {"start": "2026-01-01", "end": "2026-01-07"},
+            "boundary_uncertainty": {"type": "exact"},
+            "evidence": {"source_url": "https://synthetic.test/v1", "fetched_at": "2026-01-01T00:00:00Z", "effective_from": "2026-01-01"},
+            "revision": "r1"
+          }]
+        }
+      ]
+    }"#
+    .to_owned()
+}
+
+/// Writes `contents` under Cargo's per-test-binary tmp dir and returns the path, so a test
+/// can point `--dataset` at a fixture that does not live under `fixtures/` on disk.
+fn write_temp_dataset(name: &str, contents: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    std::fs::write(&path, contents).expect("temp dataset writes");
+    path.display().to_string()
+}
+
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_market-time"))
         .args(args)
@@ -155,6 +186,92 @@ fn the_board_draws_a_row_per_venue_with_a_key() {
     assert!(
         text.contains("? not known"),
         "the key names unknown: {text}"
+    );
+}
+
+#[test]
+fn board_html_emits_a_self_contained_interactive_document() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--hours",
+        "24",
+        "--format",
+        "html",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(
+        text.starts_with("<!doctype html"),
+        "the page starts with the doctype: {}",
+        &text[..80.min(text.len())]
+    );
+    assert!(text.trim_end().ends_with("</html>"), "{text}");
+    assert!(
+        text.contains(r#"<script type="application/json" id="mt-payload">"#),
+        "the hover payload is embedded: {text}"
+    );
+    for venue in ["SYNTH-ALWAYS", "SYNTH-AUCT", "SYNTH-DST"] {
+        assert!(text.contains(venue), "{text}");
+    }
+    assert!(
+        text.contains("rendered from dataset revision(s): synthetic-2026-07-30"),
+        "the footer names the dataset revision: {text}"
+    );
+    assert!(
+        text.contains("IANA tzdb 2026c"),
+        "and the pinned tzdb version: {text}"
+    );
+    assert!(
+        text.contains(r#"id="mt-zone-select""#),
+        "a zone selector is offered: {text}"
+    );
+    // Every venue's home zone plus UTC, per the CLI's own note in USAGE.
+    for zone in ["Asia/Shanghai", "America/New_York", "UTC"] {
+        assert!(
+            text.contains(&format!(r#"<option value="{zone}""#)),
+            "zone {zone} is offered: {text}"
+        );
+    }
+}
+
+#[test]
+fn board_html_no_bands_suppresses_the_derived_section() {
+    let with_bands = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--format",
+        "html",
+    ]);
+    assert!(with_bands.status.success(), "{}", stderr(&with_bands));
+    let with_bands_text = stdout(&with_bands);
+    assert!(
+        with_bands_text.contains("DERIVED SESSION BANDS"),
+        "bands render by default: {with_bands_text}"
+    );
+
+    let without_bands = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T02:00:00Z",
+        "--format",
+        "html",
+        "--no-bands",
+    ]);
+    assert!(without_bands.status.success(), "{}", stderr(&without_bands));
+    let without_bands_text = stdout(&without_bands);
+    assert!(
+        !without_bands_text.contains("DERIVED"),
+        "--no-bands suppresses the derived section entirely: {without_bands_text}"
     );
 }
 
@@ -337,7 +454,7 @@ fn an_unusable_format_is_refused() {
     let output = run(&["phase", "--dataset", &fixture(), "--format", "yaml"]);
     assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("is not text, json, or svg"),
+        stderr(&output).contains("is not text, json, svg, or html"),
         "{}",
         stderr(&output)
     );
@@ -440,5 +557,291 @@ fn the_board_can_be_written_as_svg() {
     assert!(
         svg.contains("an unknown is not a closed market"),
         "the honesty note travels with the picture"
+    );
+}
+
+#[test]
+fn bands_text_names_every_bands_derivation_and_reports_a_real_overlap() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T00:00:00Z",
+        "--hours",
+        "24",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(
+        text.contains("band band-regional-equities: Regional Equities Session"),
+        "{text}"
+    );
+    assert!(
+        text.contains("not any real desk's grouping"),
+        "the band's derivation note is printed, not just its id: {text}"
+    );
+    assert!(
+        text.contains("band band-continuous-markets: Continuous Markets"),
+        "{text}"
+    );
+    assert!(
+        text.contains("overlaps"),
+        "two bands means an overlap section: {text}"
+    );
+    assert!(
+        text.contains("computed as the overlap of session bands"),
+        "the overlap's own derivation note is printed too, so it cannot read as published: {text}"
+    );
+    assert!(
+        text.contains("overlapping"),
+        "the two synthetic day sessions plus the always-on venue must produce a real \
+         overlap window: {text}"
+    );
+    assert!(
+        text.contains("not overlapping"),
+        "and real gaps too — this must not read as one 24-hour block: {text}"
+    );
+}
+
+#[test]
+fn bands_json_marks_every_band_and_overlap_derived_and_never_renders_a_null_uncertainty_as_exact() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2030-01-01T00:00:00Z",
+        "--hours",
+        "24",
+        "--format",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("json output parses");
+
+    let bands = value["bands"].as_array().expect("a list of bands");
+    assert_eq!(bands.len(), 2, "{value}");
+    for band in bands {
+        assert_eq!(band["derived"], true, "{band}");
+        assert!(
+            band["reasoning"].as_str().is_some_and(|r| !r.is_empty()),
+            "{band}"
+        );
+    }
+
+    let overlaps = value["overlaps"].as_array().expect("a list of overlaps");
+    assert_eq!(
+        overlaps.len(),
+        1,
+        "exactly one pair from two bands: {value}"
+    );
+    assert_eq!(overlaps[0]["derived"], true, "{value}");
+
+    // 2030 is past every synthetic venue's declared coverage, so every segment here is
+    // unknown, and every member is unknown too: `BandSegment::uncertainty` is `None` for
+    // exactly that stretch (see its doc comment), which must reach the JSON as `null`,
+    // never dropped and never printed as though it were exact.
+    let regional = bands
+        .iter()
+        .find(|band| band["id"] == "band-regional-equities")
+        .expect("band-regional-equities is in the output");
+    let segments = regional["segments"].as_array().expect("segments");
+    assert!(
+        segments
+            .iter()
+            .any(|segment| segment["state"] == "unknown" && segment["uncertainty"].is_null()),
+        "{value}"
+    );
+    assert!(
+        !stdout(&output).contains("\"uncertainty\": \"exact\""),
+        "at this instant every synthetic venue is out of coverage, so nothing here is \
+         known precisely enough to say exact; a null uncertainty must never render as it"
+    );
+}
+
+#[test]
+fn selecting_one_band_prints_no_overlap_section() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T00:00:00Z",
+        "--hours",
+        "24",
+        "--band",
+        "band-continuous-markets",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(text.contains("band-continuous-markets"), "{text}");
+    assert!(
+        !text.contains("overlaps"),
+        "a lone band has no pair to overlap with: {text}"
+    );
+
+    let json_output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T00:00:00Z",
+        "--hours",
+        "24",
+        "--band",
+        "band-continuous-markets",
+        "--format",
+        "json",
+    ]);
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout(&json_output)).expect("json output parses");
+    assert_eq!(value["bands"].as_array().map(Vec::len), Some(1), "{value}");
+    assert_eq!(
+        value["overlaps"].as_array().map(Vec::len),
+        Some(0),
+        "{value}"
+    );
+}
+
+#[test]
+fn the_board_shows_the_dataset_bands_by_default() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(text.contains("DERIVED BANDS"), "{text}");
+    assert!(text.contains("DERIVED OVERLAPS"), "{text}");
+    assert!(text.contains("band-regional-equities"), "{text}");
+    assert!(text.contains("band-continuous-markets"), "{text}");
+    assert!(text.contains("(derived)"), "{text}");
+    assert!(
+        text.contains("not any real desk's grouping"),
+        "the band's own derivation note reaches the board, not just its id: {text}"
+    );
+}
+
+#[test]
+fn no_bands_suppresses_the_band_section_entirely() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+        "--no-bands",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(!text.contains("DERIVED"), "{text}");
+    assert!(!text.contains("band-regional-equities"), "{text}");
+    assert!(!text.contains("band-continuous-markets"), "{text}");
+}
+
+#[test]
+fn the_svg_board_shows_the_band_section_and_stays_well_formed() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+        "--format",
+        "svg",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let svg = stdout(&output);
+    assert!(svg.trim_start().starts_with("<svg"), "{svg}");
+    assert!(svg.contains("</svg>"), "{svg}");
+    assert!(svg.contains("DERIVED SESSION BANDS"), "{svg}");
+    assert!(svg.contains("DERIVED OVERLAPS"), "{svg}");
+    assert!(svg.contains("(derived)"), "{svg}");
+}
+
+#[test]
+fn no_bands_suppresses_the_svg_band_section_too() {
+    let output = run(&[
+        "board",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-07-30T04:00:00Z",
+        "--format",
+        "svg",
+        "--no-bands",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let svg = stdout(&output);
+    assert!(svg.trim_start().starts_with("<svg"), "{svg}");
+    assert!(svg.contains("</svg>"), "{svg}");
+    assert!(!svg.contains("DERIVED"), "{svg}");
+}
+
+#[test]
+fn bands_text_says_so_when_the_dataset_declares_no_bands() {
+    let dataset = write_temp_dataset("no-bands.json", &dataset_with_no_bands());
+    let output = run(&["bands", "--dataset", &dataset]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert_eq!(
+        text.trim_end(),
+        "this dataset declares no session bands",
+        "the bands command exists to talk about bands, so an empty result must say why \
+         rather than printing a bare blank line: {text:?}"
+    );
+}
+
+#[test]
+fn an_unknown_band_id_fails_loudly() {
+    let output = run(&["bands", "--dataset", &fixture(), "--band", "no-such-band"]);
+    assert!(
+        !output.status.success(),
+        "an unknown band must not be silently ignored"
+    );
+    assert!(
+        stderr(&output).contains("no band named"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn a_band_named_twice_is_rejected_by_name_rather_than_as_same_band_overlap() {
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--band",
+        "band-continuous-markets",
+        "--band",
+        "band-continuous-markets",
+    ]);
+    assert!(
+        !output.status.success(),
+        "a duplicated --band flag must not silently derive the same band twice"
+    );
+    let message = stderr(&output);
+    assert!(
+        message.contains("named more than once"),
+        "the message should name the actual mistake — a repeated flag — rather than the \
+         confusing downstream answer \"cannot be overlapped with itself\": {message}"
+    );
+    assert!(
+        message.contains("band-continuous-markets"),
+        "and should say which value was repeated: {message}"
     );
 }

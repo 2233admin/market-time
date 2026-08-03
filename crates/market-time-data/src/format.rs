@@ -14,6 +14,9 @@ pub struct DatasetFile {
     pub revisions: Vec<RevisionRecord>,
     /// The venues it describes.
     pub venues: Vec<VenueRecord>,
+    /// Regional session bands derived from this file's venues.
+    #[serde(default)]
+    pub bands: Vec<BandRecord>,
 }
 
 /// One immutable revision.
@@ -194,4 +197,25 @@ pub struct EventRecord {
     pub evidence: EvidenceRecord,
     /// The revision this rule belongs to.
     pub revision: String,
+}
+
+/// One regional session band, as a dataset declares it.
+///
+/// A band is never evidenced the way a rule is (Principle I does not apply to it that
+/// way): what it carries instead is `derived_reasoning`, and that field is required, not
+/// optional, so a band with no stated reasoning for grouping its members cannot be
+/// expressed in a dataset file at all — mirroring how [`RuleRecord::derived_reasoning`]
+/// stays optional (a rule can be an observed fact) while a band's reasoning cannot,
+/// because a band is never anything but derived.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BandRecord {
+    /// The band identifier.
+    pub id: String,
+    /// The band's display name.
+    pub display_name: String,
+    /// The venues this band is derived from. Each must name a venue this same file
+    /// declares; a band may not name a venue the dataset cannot answer for.
+    pub members: Vec<String>,
+    /// Why these venues were grouped into one band. Required — see the struct docs.
+    pub derived_reasoning: String,
 }

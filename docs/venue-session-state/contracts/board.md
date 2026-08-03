@@ -111,11 +111,101 @@ What the board MAY do, because it is presentation and not decision: choose layou
 from `Phase` variant to a visual style, locale/timezone formatting of an instant for the viewer's
 convenience (formatting, not recomputing), and ordering of venue tiles.
 
+## Derived session bands and overlaps
+
+The board may also draw a `BandSection`: the caller's already-derived `SessionBand`s and
+`BandOverlap`s (both `market-time-core` types — the board does not derive them itself, the
+same "no domain logic" rule that governs everything else here). This is additive, not a
+second mode: `BandSection::default()` is empty, and an empty section renders nothing —
+no heading, no placeholder row — so a caller that never mentions bands gets exactly the
+board this contract already describes.
+
+A band and an overlap are not a venue's published schedule (`market-time-core`'s `bands`
+module docs: a band is derived from its members, never itself evidenced). Where the board
+draws one, it MUST make that unmistakable:
+
+- every band row and overlap row is labelled "derived," not merely grouped under a heading
+  that says so — a reader must not be able to mistake a band row for a venue row above it;
+- the glyph and colour vocabulary for a band's or an overlap's state (trading-like / not /
+  unknown) MUST NOT be the vocabulary `glyph`/`phase_fill` use for a `Phase` — a band state
+  is not a phase, and reusing that vocabulary would let a band row be misread as a venue's
+  own published state;
+- an `Unknown` band or overlap stretch MUST use the same not-known hatch treatment the
+  venue rows use for an out-of-coverage stretch — that visual promise ("an unknown is not
+  a closed market") is the product's, not the venue section's alone.
+
+`BandSegment::uncertainty` and `OverlapSegment::uncertainty` are `Option<Uncertainty>`,
+`None` exactly when every contributing member is itself unknown for that stretch. The
+board MUST NOT render that `None` as "exact" or drop it silently; it renders as its own
+stated absence ("no schedule known for this stretch"), same as everywhere else in this
+product that a `None` uncertainty appears — and that statement is a different claim from
+the hatch a plain `Unknown` state already draws: the hatch says the state is not known,
+the `None` uncertainty says precision is not a meaningful question to ask of the stretch at
+all, because nothing at all is known about it. A hover title alone does not satisfy this:
+the absence MUST also be visible in the default, un-hovered view — a modest marker on the
+affected row plus a line in the section's own key or footnote — because the hover text a
+person never triggers is, for that person, the same as it not existing. The marker MAY be
+small and MUST NOT be drawn, nor the footnote line printed, for a render where no segment's
+uncertainty is `None`.
+
+## The interactive HTML surface
+
+`market_time_board::render_html` renders one self-contained, interactive HTML page: the
+same picture `render_svg`/`render_svg_with` draw, embedded verbatim, with hover, a zone
+selector, and a live clock layered on top. It is a renderer over this same contract, not a
+fourth mode with rules of its own — everything above about what the board may and may not
+compute applies to it unchanged. Three points are specific to this surface:
+
+- **No network, ever.** The page is inline CSS, inline JS, and an inline JSON payload —
+  no `<link>`, no external font, no CDN, no analytics beacon, and no reference to any
+  `http://`/`https://` resource other than an evidence source URL the dataset itself
+  supplied (and the SVG namespace URI every `<svg>` element carries by specification). A
+  page that phoned home would leak which venues an operator watches.
+- **One geometry.** The interactive picture is `render_svg_with`'s own output, not a
+  second drawing in HTML/CSS. Hover targets are identified by a `data-seg` attribute
+  already present on the rendered element; nothing about where a segment sits on the page
+  is computed a second time in this surface or in its script.
+- **Nothing is derived twice.** Every fact the hover panel can show — a phase, a band
+  state, an uncertainty, a source, a derivation note — is read out of `inspect` or the
+  already-derived `SessionBand`/`BandOverlap` the caller handed to `BandSection`, and
+  serialised into the JSON payload at render time. The script only looks values up in
+  that payload; it MUST NOT recompute a phase, an uncertainty, or a zone conversion.
+  Zone conversion in particular runs once, in Rust, against the pinned IANA database
+  this workspace bundles, for every zone offered — the payload carries one precomputed
+  label set per zone, and switching zones only swaps which set is shown. There is no
+  `Intl.DateTimeFormat` call and no zone-aware `Date` arithmetic anywhere in the page's
+  own script, because the browser's zone data is neither pinned nor reproducible
+  (Constitution Principle III) and this page's claims must be.
+- **The live clock is the one deliberate exception**, and it is deliberately narrow: only
+  when `now` came from a live host-clock read (never when it was supplied via a fixed
+  instant) does the script advance the already-drawn "now" line, using the browser's own
+  clock against the interval's own bounds — plain arithmetic on two already-known
+  instants, not a zone conversion. It is permanently captioned "browser clock — discipline
+  unmeasured" whenever it ticks, and it is never drawn with more weight than an evidenced
+  phase boundary. A page rendered against a supplied instant shows that instant as stated
+  and draws no live line at all — the two markers are never allowed to be confused with
+  each other.
+- **Works with JavaScript disabled.** The picture, the legend, the sources block, and the
+  footer are static markup; hover, zone switching, and the live clock are enhancements on
+  top of it, never a requirement for reading the board.
+
 ## Violations
 
 The board is non-conforming if it: reads the clock more than once per render or lets venues in
 one render disagree on "now"; displays "now" without a clock-discipline annotation, or falls back
 to an exact-looking clock when discipline data is unavailable; renders an unknown venue as
 `Closed`, blank, or otherwise indistinguishable from a confident answer; computes any value
-`core-api.md` was responsible for producing; or persists rule data/evidence across renders
-instead of taking it fresh from each `resolve_phases` call.
+`core-api.md` was responsible for producing; persists rule data/evidence across renders
+instead of taking it fresh from each `resolve_phases` call; draws a band or overlap row
+without labelling it derived; draws a band's or overlap's state in the same glyph or colour
+vocabulary as a `Phase`; renders an `Unknown` band or overlap stretch with anything other
+than the venue section's own not-known hatch; renders an empty `BandSection` as anything
+other than exactly the board this contract describes with no bands at all; leaves a
+`None` `BandSegment`/`OverlapSegment` uncertainty stated only in a hover title, with nothing
+in the default, un-hovered view to show it; or, for the interactive HTML surface
+specifically: makes any network reference outside an evidence source URL or the SVG
+namespace URI; recomputes a segment's position, phase, uncertainty, or zone-converted label
+in JavaScript instead of reading it from the payload this crate built in Rust; advances the
+live clock line when `now` was supplied rather than read from a live clock, or fails to
+caption it "browser clock — discipline unmeasured" whenever it does tick; or renders a page
+that cannot be read at all with JavaScript disabled.

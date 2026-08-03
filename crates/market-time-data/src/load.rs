@@ -5,14 +5,15 @@
 //! anything that the core could accidentally touch.
 
 use crate::format::{
-    ChangePointRecord, DatasetFile, DateRangeRecord, EvidenceRecord, RuleKindRecord, RuleRecord,
-    UncertaintyRecord, VenueRecord,
+    BandRecord, ChangePointRecord, DatasetFile, DateRangeRecord, EvidenceRecord, RuleKindRecord,
+    RuleRecord, UncertaintyRecord, VenueRecord,
 };
 use jiff::civil::{Date, Time, Weekday};
 use market_time_core::CoverageRange;
 use market_time_core::Phase;
 use market_time_core::Uncertainty;
 use market_time_core::{AssetFamily, VenueProfile};
+use market_time_core::{BandDefinition, BandId};
 use market_time_core::{CivilDaySchedule, DateRange, Rule, RuleKind};
 use market_time_core::{DatasetRevision, Ruleset, VenueRuleset};
 use market_time_core::{DatasetRevisionId, IanaZoneId, IdentifierError, VenueId};
@@ -22,6 +23,21 @@ use market_time_core::{Interval, UtcInstant};
 use std::fmt;
 use std::path::Path;
 
+/// Everything a dataset file materializes: the validated ruleset, and the session bands
+/// it defines.
+///
+/// Kept as one return value rather than a ruleset plus a separate band lookup, so a
+/// caller can never end up holding a ruleset from one load and a band set validated
+/// against a different one.
+#[derive(Debug, Clone)]
+pub struct LoadedDataset {
+    /// The validated ruleset.
+    pub ruleset: Ruleset,
+    /// The session bands this file defines, each already checked against `ruleset`'s
+    /// venues, and free of duplicate ids.
+    pub bands: Vec<BandDefinition>,
+}
+
 /// Reads a dataset file and builds a validated ruleset.
 ///
 /// # Errors
@@ -30,11 +46,7 @@ use std::path::Path;
 /// format, names a phase outside the shared vocabulary, or fails the core's structural
 /// validation. All of that happens here, before any query is asked.
 pub fn load_ruleset(path: &Path) -> Result<Ruleset, LoadError> {
-    let text = std::fs::read_to_string(path).map_err(|source| LoadError::Unreadable {
-        path: path.display().to_string(),
-        source: source.to_string(),
-    })?;
-    parse_ruleset(&text)
+    load_dataset(path).map(|dataset| dataset.ruleset)
 }
 
 /// Builds a validated ruleset from dataset JSON already in memory.
@@ -43,6 +55,31 @@ pub fn load_ruleset(path: &Path) -> Result<Ruleset, LoadError> {
 ///
 /// As [`load_ruleset`], minus the file read.
 pub fn parse_ruleset(text: &str) -> Result<Ruleset, LoadError> {
+    parse_dataset(text).map(|dataset| dataset.ruleset)
+}
+
+/// Reads a dataset file and builds a validated ruleset plus its session bands.
+///
+/// # Errors
+///
+/// As [`load_ruleset`], plus [`LoadError::UnknownBandMember`] when a band names a venue
+/// this same file does not declare, and [`LoadError::DuplicateBandId`] when two bands
+/// share an id.
+pub fn load_dataset(path: &Path) -> Result<LoadedDataset, LoadError> {
+    let text = std::fs::read_to_string(path).map_err(|source| LoadError::Unreadable {
+        path: path.display().to_string(),
+        source: source.to_string(),
+    })?;
+    parse_dataset(&text)
+}
+
+/// Builds a validated ruleset plus its session bands from dataset JSON already in
+/// memory.
+///
+/// # Errors
+///
+/// As [`load_dataset`], minus the file read.
+pub fn parse_dataset(text: &str) -> Result<LoadedDataset, LoadError> {
     let file: DatasetFile =
         serde_json::from_str(text).map_err(|source| LoadError::Malformed(source.to_string()))?;
 
@@ -69,7 +106,65 @@ pub fn parse_ruleset(text: &str) -> Result<Ruleset, LoadError> {
         .map(venue_ruleset)
         .collect::<Result<Vec<_>, LoadError>>()?;
 
-    Ruleset::from_parts(revisions, venues).map_err(|source| LoadError::Invalid(source.to_string()))
+    let ruleset = Ruleset::from_parts(revisions, venues)
+        .map_err(|source| LoadError::Invalid(source.to_string()))?;
+
+    let bands = band_definitions(&file.bands, &ruleset)?;
+
+    Ok(LoadedDataset { ruleset, bands })
+}
+
+/// Builds this file's session band definitions, each checked against the venues the same
+/// file declares.
+///
+/// # Errors
+///
+/// Returns [`LoadError::DuplicateBandId`] when two bands in `records` share an id,
+/// [`LoadError::UnknownBandMember`] when a band names a venue absent from `ruleset` — a
+/// band may not name a venue the dataset cannot answer for — and [`LoadError::Invalid`]
+/// wrapping whatever [`BandId::new`] or [`BandDefinition::new`] rejected: a blank id, an
+/// empty member list, a duplicate member, or a blank reasoning are all judged by the core
+/// types themselves, not re-implemented here.
+fn band_definitions(
+    records: &[BandRecord],
+    ruleset: &Ruleset,
+) -> Result<Vec<BandDefinition>, LoadError> {
+    let known_venues = ruleset.venues();
+    let mut seen_ids: Vec<&str> = Vec::with_capacity(records.len());
+    let mut bands = Vec::with_capacity(records.len());
+
+    for record in records {
+        if seen_ids.contains(&record.id.as_str()) {
+            return Err(LoadError::DuplicateBandId {
+                id: record.id.clone(),
+            });
+        }
+        seen_ids.push(&record.id);
+
+        let id = identifier(BandId::new(&record.id))?;
+
+        let mut members = Vec::with_capacity(record.members.len());
+        for member in &record.members {
+            let venue = identifier(VenueId::new(member))?;
+            if !known_venues.contains(&venue) {
+                return Err(LoadError::UnknownBandMember {
+                    band: record.id.clone(),
+                    venue: member.clone(),
+                });
+            }
+            members.push(venue);
+        }
+
+        let derivation = DerivationNote::new(&record.derived_reasoning)
+            .map_err(|source| LoadError::Invalid(source.to_string()))?;
+
+        let definition = BandDefinition::new(id, record.display_name.clone(), members, derivation)
+            .map_err(|source| LoadError::Invalid(source.to_string()))?;
+
+        bands.push(definition);
+    }
+
+    Ok(bands)
 }
 
 fn venue_ruleset(record: &VenueRecord) -> Result<VenueRuleset, LoadError> {
@@ -318,6 +413,18 @@ pub enum LoadError {
         /// The value that could not be parsed.
         value: String,
     },
+    /// A band named a venue this file does not declare.
+    UnknownBandMember {
+        /// The band that named it.
+        band: String,
+        /// The venue id that is not among this file's venues.
+        venue: String,
+    },
+    /// Two bands in one file share the same identifier.
+    DuplicateBandId {
+        /// The id used by more than one band.
+        id: String,
+    },
 }
 
 impl fmt::Display for LoadError {
@@ -347,6 +454,15 @@ impl fmt::Display for LoadError {
             Self::BadDate { value } => write!(f, "{value:?} is not a YYYY-MM-DD date"),
             Self::BadTime { value } => write!(f, "{value:?} is not an HH:MM time of day"),
             Self::BadWeekday { value } => write!(f, "{value:?} is not a weekday name"),
+            Self::UnknownBandMember { band, venue } => write!(
+                f,
+                "band {band:?} names venue {venue:?}, which is not among this file's \
+                 venues; a band may not name a venue the dataset cannot answer for"
+            ),
+            Self::DuplicateBandId { id } => write!(
+                f,
+                "band id {id:?} is used by more than one band in this file"
+            ),
         }
     }
 }

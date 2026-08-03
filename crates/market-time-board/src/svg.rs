@@ -21,10 +21,16 @@
 //! No dependency, no font loading, no script: the output is a self-contained SVG string
 //! that opens anywhere and diffs cleanly.
 
-use crate::{BoardRow, BoardView, NowMarker, grouped, trading_count};
+use crate::{
+    BoardRow, BoardView, NowMarker, band_label, band_state_word, grouped, overlap_label,
+    overlap_state_word, trading_count,
+};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use market_time_core::{Interval, Phase, Timeline, TimelineSegment, Uncertainty, UtcInstant};
+use market_time_core::{
+    BandOverlap, BandState, Interval, OverlapState, Phase, SessionBand, Timeline, TimelineSegment,
+    Uncertainty, UtcInstant,
+};
 use std::fmt::Write as _;
 
 /// Colours, named once. Keeping them out of the markup strings also keeps those strings
@@ -47,7 +53,32 @@ mod palette {
     pub const CLOSED: &str = "#30363d";
     pub const HALTED: &str = "#f85149";
     pub const UNHANDLED: &str = "#db6d28";
+    // The derived band/overlap section's own colours — deliberately not the phase palette
+    // above, so a band row is distinguishable from a venue row by colour too, not only by
+    // its shorter track and its "(derived)" label.
+    pub const BAND_TRADING: &str = "#3fb950";
+    pub const BAND_NOT_TRADING: &str = "#21262d";
+    pub const OVERLAP_TRADING: &str = "#d2a8ff";
 }
+
+/// Number of intervals the time axis is divided into for its tick labels — 9 labels,
+/// evenly spaced from the interval's start to its end.
+///
+/// `pub(crate)` so `html.rs` can compute the same 9 tick instants for every zone the
+/// interactive page offers, through the same [`at_fraction`] this renderer itself uses:
+/// one geometry, read twice, never recomputed by a second formula that could drift from
+/// this one.
+pub(crate) const AXIS_TICKS: usize = 8;
+
+/// Layout constants for the derived band section, shared between the height calculation
+/// and the drawing pass so the two cannot drift apart — a mismatch there would either
+/// clip a row or leave dead canvas beneath it.
+const BAND_ROW_SCALE: f64 = 0.72;
+const BAND_SECTION_TOP_GAP: f64 = 24.0;
+const BAND_HEADING_HEIGHT: f64 = 20.0;
+const BAND_OVERLAP_GAP: f64 = 6.0;
+const BAND_SECTION_NOTE_GAP: f64 = 24.0;
+const BAND_SECTION_NO_SCHEDULE_LINE_HEIGHT: f64 = 15.0;
 
 /// Layout.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +137,15 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
     } else {
         Vec::new()
     };
-    let height = header + all_rows + 78.0 + 15.0 * count_as_f64(sources.len());
+    // Zero when there is nothing to draw, so a zero-band view's canvas is exactly the
+    // height it always was — not a pixel added for a section that never appears.
+    let band_extra = band_section_height(view, options);
+    let height = header + all_rows + 78.0 + 15.0 * count_as_f64(sources.len()) + band_extra;
+    // Where the derived band section's rows start, in canvas coordinates — `0.0` reads as
+    // unused when `band_extra` is `0.0` (no bands to draw). Computed once up here, rather
+    // than separately at the now-line and at the section's own draw call, so the two can
+    // never disagree about where that section begins.
+    let band_top = height - band_extra;
 
     let mut svg = String::new();
     let _ = write!(
@@ -129,7 +168,10 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
     if let Some(now) = &view.now {
         let _ = write!(
             svg,
-            r#"<text x="24" y="54" fill="{fill}" font-size="12">{when} · {clock}</text>"#,
+            // `id="mt-now-info"` so the interactive HTML surface can swap this whole line's
+            // text for a per-zone equivalent computed the same way, in Rust, at render
+            // time — never by reformatting the instant itself in the browser.
+            r#"<text id="mt-now-info" x="24" y="54" fill="{fill}" font-size="12">{when} · {clock}</text>"#,
             fill = palette::MUTED,
             when = escape(&format_instant(&zone, now.instant)),
             clock = escape(&now.discipline.describe())
@@ -146,14 +188,14 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
     }
     let _ = write!(
         svg,
-        r#"<text x="{x:.0}" y="54" fill="{fill}" font-size="12" text-anchor="end">axis in {zone_label}</text>"#,
+        r#"<text id="mt-axis-zone-label" x="{x:.0}" y="54" fill="{fill}" font-size="12" text-anchor="end">axis in {zone_label}</text>"#,
         x = f64::from(options.width) - 24.0,
         fill = palette::MUTED,
         zone_label = escape(&view.axis_zone)
     );
 
     // Axis.
-    let ticks = 8_usize;
+    let ticks = AXIS_TICKS;
     for tick in 0..=ticks {
         let fraction = count_as_f64(tick) / count_as_f64(ticks);
         let x = track_left + track_span * fraction;
@@ -166,7 +208,10 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
         );
         let _ = write!(
             svg,
-            r#"<text x="{x:.1}" y="{y:.0}" fill="{fill}" font-size="11" text-anchor="{anchor}">{label}</text>"#,
+            // `data-tick` names which of the `AXIS_TICKS + 1` evenly spaced labels this is,
+            // so the interactive HTML surface can replace its text per chosen zone without
+            // moving it — the position came from this renderer and stays exactly here.
+            r#"<text data-tick="{tick}" x="{x:.1}" y="{y:.0}" fill="{fill}" font-size="11" text-anchor="{anchor}">{label}</text>"#,
             y = header - 16.0,
             fill = palette::FAINT,
             // The first and last labels would otherwise hang over the label and status
@@ -182,6 +227,10 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
 
     // Rows, grouped the way conventional boards group them.
     let mut cursor_y = header;
+    // Flat index across every venue row, independent of family grouping — the interactive
+    // HTML surface's segment ids (`data-seg="v{row_index}.{segment_index}"`) key off this,
+    // so it has to count the same rows in the same order this loop draws them.
+    let mut row_index: usize = 0;
     for (family, members) in &groups {
         let _ = write!(
             svg,
@@ -225,11 +274,21 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
             }
             let _ = write!(
                 svg,
-                r#"<rect x="{track_left:.1}" y="{bar_y:.1}" width="{track_span:.1}" height="{bar_height:.1}" fill="{fill}" rx="3"/>"#,
+                // `id="mt-track"` marks only the very first venue row's track: the
+                // interactive HTML surface reads this one rect's own `x`/`width` back off
+                // the DOM to place its live clock line, rather than this renderer exporting
+                // `track_left`/`track_span` through a second code path that could drift
+                // from the numbers actually drawn here.
+                r#"<rect{track_id} x="{track_left:.1}" y="{bar_y:.1}" width="{track_span:.1}" height="{bar_height:.1}" fill="{fill}" rx="3"/>"#,
+                track_id = if row_index == 0 {
+                    r#" id="mt-track""#
+                } else {
+                    ""
+                },
                 fill = palette::TRACK
             );
 
-            for segment in &row.timeline.segments {
+            for (segment_index, segment) in row.timeline.segments.iter().enumerate() {
                 let Some((x, width)) =
                     placement(view.interval, segment.interval(), track_left, track_span)
                 else {
@@ -253,7 +312,11 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
 
                 let _ = write!(
                     svg,
-                    r#"<rect x="{x:.2}" y="{bar_y:.1}" width="{width:.2}" height="{bar_height:.1}" fill="{fill}" rx="2"><title>{hover}</title></rect>"#,
+                    // `data-seg` names this segment for the interactive HTML surface's
+                    // hover panel, which looks the id up in a payload built from the same
+                    // `market_time_board::inspect` this crate already exposes — never a
+                    // second reading of the segment done in JavaScript.
+                    r#"<rect data-seg="v{row_index}.{segment_index}" x="{x:.2}" y="{bar_y:.1}" width="{width:.2}" height="{bar_height:.1}" fill="{fill}" rx="2"><title>{hover}</title></rect>"#,
                     hover = escape(&hover)
                 );
 
@@ -287,19 +350,36 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
                 );
             }
             cursor_y += row_height;
+            row_index += 1;
         }
     }
 
-    // The instant being viewed.
+    // The instant being viewed. Drawn the full height of every track that shares this
+    // axis: the venue rows always, and the derived band/overlap rows too when the view has
+    // any — `render_band_row`/`render_overlap_row`'s text-renderer counterpart
+    // (`market_time_board::mark_now`) marks `now` on band rows for the same reason, so the
+    // SVG line stopping above them would contradict its own text sibling. With no bands,
+    // `band_extra` is `0.0` and `band_top` equals `height`, so the endpoint below is
+    // unchanged from before bands existed.
     if let Some(now) = &view.now
         && view.interval.contains(now.instant)
     {
         let x = track_left + track_span * fraction_of(view.interval, now.instant);
+        let bottom = if band_extra > 0.0 {
+            band_top + band_extra - BAND_SECTION_NOTE_GAP
+        } else {
+            header + all_rows + 4.0
+        };
         let _ = write!(
             svg,
-            r#"<line x1="{x:.2}" y1="{top:.1}" x2="{x:.2}" y2="{bottom:.1}" stroke="{stroke}" stroke-width="1.5"/>"#,
+            // `id="mt-now-line"` so the interactive HTML surface can find exactly this
+            // line — never draw a second one — and, only when `now` came from a live
+            // clock read rather than a supplied `--at`, advance its `x1`/`x2` in real
+            // time. `y1`/`y2` are never touched by that: they stay whatever this renderer
+            // decided, so the line's vertical reach through the band section (or not)
+            // still comes from here, not from the browser.
+            r#"<line id="mt-now-line" x1="{x:.2}" y1="{top:.1}" x2="{x:.2}" y2="{bottom:.1}" stroke="{stroke}" stroke-width="1.5"/>"#,
             top = header - 12.0,
-            bottom = header + all_rows + 4.0,
             stroke = palette::NOW
         );
     }
@@ -350,8 +430,342 @@ pub fn render_svg_with(view: &BoardView, options: &SvgOptions) -> String {
         );
     }
 
+    if !view.bands.is_empty() {
+        render_band_section(&mut svg, view, options, band_top, track_left, track_span);
+    }
+
     svg.push_str("</svg>");
     svg
+}
+
+/// The extra canvas height the derived band section needs, or exactly `0.0` with no bands
+/// to draw.
+///
+/// Kept in lock-step with [`render_band_section`]'s own cursor arithmetic through the
+/// shared `BAND_*` constants, so the canvas this function sizes and the section that
+/// function draws can never disagree about how tall it is. That includes the extra
+/// no-schedule footnote line: [`render_band_section`] only draws it when some segment's
+/// uncertainty is `None`, so this only reserves room for it under the same condition.
+fn band_section_height(view: &BoardView, options: &SvgOptions) -> f64 {
+    if view.bands.bands.is_empty() {
+        return 0.0;
+    }
+    let band_row_height = f64::from(options.row_height) * BAND_ROW_SCALE;
+    let mut height = BAND_SECTION_TOP_GAP + BAND_HEADING_HEIGHT;
+    height += band_row_height * count_as_f64(view.bands.bands.len());
+    if !view.bands.overlaps.is_empty() {
+        height += BAND_OVERLAP_GAP + BAND_HEADING_HEIGHT;
+        height += band_row_height * count_as_f64(view.bands.overlaps.len());
+    }
+    if any_segment_has_no_schedule(view) {
+        height += BAND_SECTION_NO_SCHEDULE_LINE_HEIGHT;
+    }
+    height + BAND_SECTION_NOTE_GAP
+}
+
+/// Whether any drawn band or overlap segment has `uncertainty: None` — "no schedule known
+/// for this stretch" — so [`render_band_section`] and [`band_section_height`] agree,
+/// without either recomputing the other's cursor walk, on whether the extra footnote line
+/// naming that absence is needed at all.
+fn any_segment_has_no_schedule(view: &BoardView) -> bool {
+    view.bands
+        .bands
+        .iter()
+        .flat_map(SessionBand::segments)
+        .any(|segment| segment.uncertainty.is_none())
+        || view
+            .bands
+            .overlaps
+            .iter()
+            .flat_map(BandOverlap::segments)
+            .any(|segment| segment.uncertainty.is_none())
+}
+
+/// Renders the derived band and overlap rows beneath the venue section, as a fully
+/// separate pass appended after everything the board already draws.
+///
+/// A zero-band view never calls this function at all (see the call site above), so it
+/// cannot add a byte of markup or a pixel of height to a board that has nothing derived to
+/// show. Where it is called, three independent signals mark every row as derived rather
+/// than a venue's published schedule, in case a viewer misses one: the section heading
+/// says DERIVED, the row's own label carries a "(derived)" tag, and the track is drawn
+/// shorter than a venue row's. An unknown stretch still uses `url(#not-known)` — the same
+/// hatch pattern the venue rows use — because that visual promise ("an unknown is not a
+/// closed market") is the product's, not the venue section's alone, and a band's unknown
+/// stretch deserves exactly the same honesty.
+fn render_band_section(
+    svg: &mut String,
+    view: &BoardView,
+    options: &SvgOptions,
+    top: f64,
+    track_left: f64,
+    track_span: f64,
+) {
+    let band_row_height = f64::from(options.row_height) * BAND_ROW_SCALE;
+    let mut cursor_y = top + BAND_SECTION_TOP_GAP;
+
+    let _ = write!(
+        svg,
+        r#"<line x1="24" y1="{top:.1}" x2="{x2:.1}" y2="{top:.1}" stroke="{stroke}" stroke-width="1" stroke-dasharray="3,3"/>"#,
+        x2 = f64::from(options.width) - 24.0,
+        stroke = palette::GRID
+    );
+    let _ = write!(
+        svg,
+        r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11" font-weight="600" letter-spacing="0.6">DERIVED SESSION BANDS — never a venue's published schedule</text>"#,
+        y = cursor_y + 4.0,
+        fill = palette::ATTENTION
+    );
+    cursor_y += BAND_HEADING_HEIGHT;
+
+    let mut any_no_schedule = render_band_rows(
+        svg,
+        &view.bands.bands,
+        view.interval,
+        track_left,
+        track_span,
+        band_row_height,
+        &mut cursor_y,
+    );
+
+    if !view.bands.overlaps.is_empty() {
+        cursor_y += BAND_OVERLAP_GAP;
+        let _ = write!(
+            svg,
+            r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11" font-weight="600" letter-spacing="0.6">DERIVED OVERLAPS</text>"#,
+            y = cursor_y + 4.0,
+            fill = palette::ATTENTION
+        );
+        cursor_y += BAND_HEADING_HEIGHT;
+
+        any_no_schedule |= render_overlap_rows(
+            svg,
+            &view.bands.overlaps,
+            view.interval,
+            track_left,
+            track_span,
+            band_row_height,
+            &mut cursor_y,
+        );
+    }
+
+    let _ = write!(
+        svg,
+        r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11">{note}</text>"#,
+        y = cursor_y + 16.0,
+        fill = palette::FAINT,
+        note = escape(&format!(
+            "bands and overlaps are computed groupings, never a venue's published hours — {}",
+            crate::band_legend()
+        ))
+    );
+
+    // Named once for the whole section, not per row: a viewer who never hovers still needs
+    // to be told what the small dot on some rows means, in the same "no schedule known for
+    // this stretch" words the hover title uses — never anything that could read as exact,
+    // and never drawn at all when no row in this section carries it.
+    if any_no_schedule {
+        cursor_y += BAND_SECTION_NO_SCHEDULE_LINE_HEIGHT;
+        let _ = write!(
+            svg,
+            r#"<text x="24" y="{y:.1}" fill="{fill}" font-size="11">● no schedule known for this stretch — every contributing member is itself unknown there</text>"#,
+            y = cursor_y + 16.0,
+            fill = palette::ATTENTION
+        );
+    }
+}
+
+/// Draws one row per [`SessionBand`], advancing `cursor_y` past each, and returns whether
+/// any drawn segment carried the no-schedule marker.
+///
+/// Split out of [`render_band_section`] only to keep that function's line count readable;
+/// the geometry and per-segment mapping are exactly what used to live inline there.
+fn render_band_rows(
+    svg: &mut String,
+    bands: &[SessionBand],
+    interval: Interval,
+    track_left: f64,
+    track_span: f64,
+    band_row_height: f64,
+    cursor_y: &mut f64,
+) -> bool {
+    let mut any_no_schedule = false;
+    for (band_index, band) in bands.iter().enumerate() {
+        let geometry = BarGeometry {
+            track_left,
+            track_span,
+            bar_y: *cursor_y + 4.0,
+            bar_height: (band_row_height - 8.0).max(4.0),
+        };
+        let segments = band.segments().iter().map(|segment| {
+            let fill = match segment.state {
+                BandState::Unknown => "url(#not-known)".to_owned(),
+                BandState::Trading => palette::BAND_TRADING.to_owned(),
+                BandState::NotTrading => palette::BAND_NOT_TRADING.to_owned(),
+                _ => palette::UNHANDLED.to_owned(),
+            };
+            let hover = band_hover_text(
+                &band_state_word(segment.state),
+                segment.uncertainty.as_ref(),
+            );
+            (segment.interval, fill, hover, segment.uncertainty.is_none())
+        });
+        any_no_schedule |= render_derived_row(
+            svg,
+            &band_label(band),
+            &format!("b{band_index}"),
+            segments,
+            interval,
+            &geometry,
+        );
+        *cursor_y += band_row_height;
+    }
+    any_no_schedule
+}
+
+/// The [`BandOverlap`] counterpart of [`render_band_rows`].
+fn render_overlap_rows(
+    svg: &mut String,
+    overlaps: &[BandOverlap],
+    interval: Interval,
+    track_left: f64,
+    track_span: f64,
+    band_row_height: f64,
+    cursor_y: &mut f64,
+) -> bool {
+    let mut any_no_schedule = false;
+    for (overlap_index, overlap) in overlaps.iter().enumerate() {
+        let geometry = BarGeometry {
+            track_left,
+            track_span,
+            bar_y: *cursor_y + 4.0,
+            bar_height: (band_row_height - 8.0).max(4.0),
+        };
+        let segments = overlap.segments().iter().map(|segment| {
+            let fill = match segment.state {
+                OverlapState::Unknown => "url(#not-known)".to_owned(),
+                OverlapState::Overlapping => palette::OVERLAP_TRADING.to_owned(),
+                OverlapState::NotOverlapping => palette::BAND_NOT_TRADING.to_owned(),
+                _ => palette::UNHANDLED.to_owned(),
+            };
+            let hover = band_hover_text(
+                &overlap_state_word(segment.state),
+                segment.uncertainty.as_ref(),
+            );
+            (segment.interval, fill, hover, segment.uncertainty.is_none())
+        });
+        any_no_schedule |= render_derived_row(
+            svg,
+            &overlap_label(overlap),
+            &format!("o{overlap_index}"),
+            segments,
+            interval,
+            &geometry,
+        );
+        *cursor_y += band_row_height;
+    }
+    any_no_schedule
+}
+
+/// Where and how tall one derived row's track is drawn.
+///
+/// Bundled so [`render_derived_row`] takes one geometry argument instead of four loose
+/// numbers — the same track position and bar height a band row and an overlap row share,
+/// just computed fresh per row as `cursor_y` advances.
+struct BarGeometry {
+    track_left: f64,
+    track_span: f64,
+    bar_y: f64,
+    bar_height: f64,
+}
+
+/// Draws one band or overlap row: its label with the "(derived)" tag, a track drawn with a
+/// dashed border (never a venue row's plain one), and each segment placed exactly as a
+/// venue row's segments are — through the same [`placement`] — and filled with whatever
+/// colour and hover text the caller already resolved for its state.
+///
+/// Shared by both loops in [`render_band_section`] because the layout is identical between
+/// a band row and an overlap row; only the state-to-colour mapping differs, and that stays
+/// with each caller rather than becoming a parameter this function would have to branch on.
+///
+/// The segment tuple's `bool` is whether that segment's uncertainty is `None` — "no
+/// schedule is known for this stretch," never merely "unknown state" — and marks the
+/// segment with a small dot rather than leaving that absence stated only in the hover
+/// title. Returns whether any segment carried that marker, so the caller can decide once,
+/// for the whole section, whether the footnote naming it is needed at all.
+///
+/// `row_id` (`"b{index}"` or `"o{index}"`) names this row for the interactive HTML
+/// surface: each drawn segment gets `data-seg="{row_id}.{segment_index}"`, the same
+/// scheme the venue rows use with `"v{row_index}.{segment_index}"`, so a hover payload
+/// built by walking `view.bands` in the same order can find it.
+fn render_derived_row(
+    svg: &mut String,
+    label: &str,
+    row_id: &str,
+    segments: impl Iterator<Item = (Interval, String, String, bool)>,
+    interval: Interval,
+    geometry: &BarGeometry,
+) -> bool {
+    let &BarGeometry {
+        track_left,
+        track_span,
+        bar_y,
+        bar_height,
+    } = geometry;
+
+    let _ = write!(
+        svg,
+        r#"<text x="24" y="{text_y:.1}" fill="{fill}" font-size="12">{label} <tspan fill="{muted}" font-size="10">(derived)</tspan></text>"#,
+        text_y = bar_y + bar_height * 0.85,
+        fill = palette::LABEL,
+        label = escape(label),
+        muted = palette::FAINT,
+    );
+    let _ = write!(
+        svg,
+        r#"<rect x="{track_left:.1}" y="{bar_y:.1}" width="{track_span:.1}" height="{bar_height:.1}" fill="{fill}" stroke="{stroke}" stroke-width="1" stroke-dasharray="2,2" rx="2"/>"#,
+        fill = palette::TRACK,
+        stroke = palette::FAINT
+    );
+
+    let mut any_no_schedule = false;
+    for (segment_index, (segment_interval, fill, hover, no_schedule)) in segments.enumerate() {
+        let Some((x, width)) = placement(interval, segment_interval, track_left, track_span) else {
+            continue;
+        };
+        let _ = write!(
+            svg,
+            r#"<rect data-seg="{row_id}.{segment_index}" x="{x:.2}" y="{bar_y:.1}" width="{width:.2}" height="{bar_height:.1}" fill="{fill}" rx="2"><title>{hover}</title></rect>"#,
+            hover = escape(&hover)
+        );
+        if no_schedule {
+            any_no_schedule = true;
+            // A small dot at the segment's top-left corner — modest, not a redesign of the
+            // row — carrying the same claim the hover title already makes, so a viewer who
+            // never hovers still sees that this stretch is not merely "unknown state" but
+            // has no schedule known for it at all. Tagged with the same `data-seg` as its
+            // segment so hovering the dot itself still resolves to the right payload entry.
+            let _ = write!(
+                svg,
+                r#"<circle data-seg="{row_id}.{segment_index}" cx="{cx:.2}" cy="{cy:.1}" r="2.2" fill="{fill}"><title>{hover}</title></circle>"#,
+                cx = x + 4.0,
+                cy = bar_y + 3.5,
+                fill = palette::ATTENTION,
+                hover = escape(&hover)
+            );
+        }
+    }
+    any_no_schedule
+}
+
+/// The hover title for one band or overlap segment: its state in words, then how
+/// precisely it is known — or, when nothing is known at all (`BandSegment::uncertainty`'s
+/// `None` case), a sentence saying so rather than a blank that could be misread as exact.
+fn band_hover_text(state_word: &str, uncertainty: Option<&Uncertainty>) -> String {
+    match uncertainty {
+        Some(uncertainty) => format!("{state_word} · {uncertainty}"),
+        None => format!("{state_word} · no schedule known for this stretch"),
+    }
 }
 
 fn defs() -> String {
@@ -413,7 +827,13 @@ fn fraction_of(interval: Interval, at: UtcInstant) -> f64 {
     nanos_as_f64(offset) / nanos_as_f64(span)
 }
 
-fn at_fraction(interval: Interval, fraction: f64) -> UtcInstant {
+/// The instant at `fraction` of the way across `interval` — the inverse of
+/// [`fraction_of`], and what the axis ticks are placed at.
+///
+/// `pub(crate)` so `html.rs` computes each zone's tick labels at exactly the instants
+/// this renderer already drew ticks for, rather than re-deriving them from `AXIS_TICKS`
+/// on its own: one fraction-to-instant mapping, not two.
+pub(crate) fn at_fraction(interval: Interval, fraction: f64) -> UtcInstant {
     let span = interval.start.saturating_nanos_until(interval.end).max(1);
     #[allow(clippy::cast_possible_truncation)]
     let offset = (fraction * nanos_as_f64(span)) as i128;
@@ -430,8 +850,10 @@ fn nanos_as_f64(value: i128) -> f64 {
     value as f64
 }
 
+/// `pub(crate)` so `html.rs` divides tick indices by [`AXIS_TICKS`] with the exact same
+/// cast this renderer uses for its own tick fractions.
 #[allow(clippy::cast_precision_loss)]
-fn count_as_f64(value: usize) -> f64 {
+pub(crate) fn count_as_f64(value: usize) -> f64 {
     value as f64
 }
 
@@ -477,12 +899,18 @@ fn zoned(zone: &TimeZone, at: UtcInstant) -> jiff::Zoned {
         .to_zoned(zone.clone())
 }
 
-fn format_hour(zone: &TimeZone, at: UtcInstant) -> String {
+/// `pub(crate)` so `html.rs` formats the same axis-tick hour label for a zone the viewer
+/// switched to, through the identical formatting this renderer used for the zone it drew
+/// with — never a second, browser-side rendering of the same instant.
+pub(crate) fn format_hour(zone: &TimeZone, at: UtcInstant) -> String {
     let zoned = zoned(zone, at);
     format!("{:02}:{:02}", zoned.hour(), zoned.minute())
 }
 
-fn format_instant(zone: &TimeZone, at: UtcInstant) -> String {
+/// `pub(crate)` for the same reason [`format_hour`] is: `html.rs` needs the identical
+/// per-zone instant formatting for its evidence panel's boundary times as this renderer
+/// uses for its own "as of" line, computed once, in Rust, never re-derived in JavaScript.
+pub(crate) fn format_instant(zone: &TimeZone, at: UtcInstant) -> String {
     let zoned = zoned(zone, at);
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
@@ -495,11 +923,12 @@ fn format_instant(zone: &TimeZone, at: UtcInstant) -> String {
     )
 }
 
-/// XML-escapes text that comes from data.
+/// XML/HTML-escapes text that comes from data.
 ///
 /// Venue names, source URLs, and derivation notes are all operator-supplied, and none of
-/// them may be able to close a tag.
-fn escape(text: &str) -> String {
+/// them may be able to close a tag. `pub(crate)` so `html.rs` escapes the same data the
+/// same way when it prints it into the page's own markup, outside the embedded SVG.
+pub(crate) fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for character in text.chars() {
         match character {

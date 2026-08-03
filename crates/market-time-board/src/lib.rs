@@ -22,14 +22,19 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
+pub mod html;
 pub mod svg;
 
+pub use html::{DatasetRevisionFooter, HtmlOptions, render_html};
 pub use svg::{SvgOptions, render_svg, render_svg_with};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use market_time_core::Phase;
 use market_time_core::{AssetFamily, EvidenceRef, Interval, UtcInstant, VenueId, VenueProfile};
+use market_time_core::{
+    BandOverlap, BandSegment, BandState, OverlapSegment, OverlapState, SessionBand,
+};
 use market_time_core::{Timeline, TimelineSegment};
 use std::fmt::Write as _;
 
@@ -129,6 +134,35 @@ impl BoardRow {
     }
 }
 
+/// The derived session bands and their pairwise overlaps to draw beneath the venue rows.
+///
+/// Bundled as one struct, not two loose fields on [`BoardView`], so a caller can never end
+/// up passing overlaps computed from a different band set than the one drawn above them.
+/// Defaults to empty, which draws no band section at all — not an empty section with
+/// nothing in it. A band and an overlap are never a venue's published schedule (see
+/// `market_time_core`'s `bands` module docs); this crate draws no schedule of its own
+/// either way, only what was derived and handed in.
+#[derive(Debug, Clone, Default)]
+pub struct BandSection {
+    /// The derived bands to draw, each already produced by
+    /// `market_time_core::derive_band`.
+    pub bands: Vec<SessionBand>,
+    /// The pairwise overlaps between those bands, each already produced by
+    /// `market_time_core::derive_overlap`.
+    pub overlaps: Vec<BandOverlap>,
+}
+
+impl BandSection {
+    /// Whether there is nothing to draw.
+    ///
+    /// Overlaps never arrive without bands (there is nothing to overlap otherwise), so
+    /// checking `bands` alone is enough to decide whether the whole section is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bands.is_empty()
+    }
+}
+
 /// What the board renders.
 #[derive(Debug, Clone)]
 pub struct BoardView {
@@ -142,6 +176,10 @@ pub struct BoardView {
     pub axis_zone: String,
     /// How many columns the timeline occupies.
     pub columns: usize,
+    /// Derived bands and their overlaps, drawn beneath the venue rows. Empty by default:
+    /// a caller that never mentions bands gets exactly the board this crate drew before
+    /// bands existed.
+    pub bands: BandSection,
 }
 
 /// Renders the board as text.
@@ -153,10 +191,23 @@ pub struct BoardView {
 pub fn render(view: &BoardView) -> String {
     let zone = TimeZone::get(&view.axis_zone).unwrap_or(TimeZone::UTC);
     let columns = view.columns.max(12);
+    // Every row's `[` track shares one column down the whole page — venue rows and the
+    // derived band/overlap rows beneath them alike — so this width has to be the widest
+    // label in the *entire* board, not just the venue rows sitting above the fold. Leaving
+    // the derived labels out here (as a version of this once did) let `label_width` and
+    // `render_band_section`'s own recomputation disagree whenever one set of labels was
+    // shorter than the other, shifting that section's tracks out of column.
     let label_width = view
         .rows
         .iter()
         .map(|row| row.label.len())
+        .chain(view.bands.bands.iter().map(|band| band_label(band).len()))
+        .chain(
+            view.bands
+                .overlaps
+                .iter()
+                .map(|overlap| overlap_label(overlap).len()),
+        )
         .max()
         .unwrap_or(6)
         .max(6);
@@ -204,6 +255,11 @@ pub fn render(view: &BoardView) -> String {
         );
     }
     let _ = writeln!(out, "  key:  {}", legend());
+
+    if !view.bands.is_empty() {
+        let _ = writeln!(out);
+        out.push_str(&render_band_section(view, columns, label_width));
+    }
 
     let sources = render_sources(&view.rows);
     if !sources.is_empty() {
@@ -484,6 +540,24 @@ fn render_row(
         };
     }
 
+    mark_now(&mut cells, interval, now, columns, span);
+
+    let rendered: String = cells.into_iter().collect();
+    format!("[{rendered}]")
+}
+
+/// Marks the instant being viewed on a rendered row of cells.
+///
+/// Shared by the venue, band, and overlap row renderers so the marker's column arithmetic
+/// cannot drift between them — a viewer reading straight down a column across all three
+/// sections must see the same instant, not three approximations of it.
+fn mark_now(
+    cells: &mut [char],
+    interval: Interval,
+    now: Option<&NowMarker>,
+    columns: usize,
+    span: i128,
+) {
     if let Some(now) = now
         && interval.contains(now.instant)
     {
@@ -493,9 +567,6 @@ fn render_row(
             *cell = '|';
         }
     }
-
-    let rendered: String = cells.into_iter().collect();
-    format!("[{rendered}]")
 }
 
 fn as_i128(value: usize) -> i128 {
@@ -518,6 +589,233 @@ fn status(timeline: &Timeline, now: Option<&NowMarker>) -> String {
         Some(TimelineSegment::Unknown { .. }) => "not known".to_owned(),
         None => "not shown".to_owned(),
     }
+}
+
+/// The glyph a derived band's state renders as.
+///
+/// Deliberately not [`glyph`]'s vocabulary: a [`BandState`] is a computed grouping
+/// (`market_time_core`'s `bands` module docs), never a venue's published [`Phase`], and
+/// reusing `#`/`.`/`?` here would let a band row be misread as a venue's phase at a
+/// glance. `?` in particular stays reserved for a venue's own out-of-coverage stretch —
+/// [`BandState::Unknown`] renders as `x` instead, so the two kinds of "not known" are never
+/// the same character.
+#[must_use]
+pub fn band_glyph(state: BandState) -> char {
+    match state {
+        BandState::Trading => '+',
+        BandState::NotTrading => '~',
+        BandState::Unknown => 'x',
+        // The vocabulary is closed and owned by the core; kept distinct from `glyph`'s own
+        // fallback `*` for the same reason `?` is kept distinct above.
+        _ => '%',
+    }
+}
+
+/// The glyph a computed overlap's state renders as.
+///
+/// Shares [`band_glyph`]'s three characters — `+`/`~`/`x` read as "trading-like / not /
+/// unknown" whether the row is a band or an overlap of two bands — rather than inventing a
+/// fourth vocabulary a reader would have to learn on top of the other two.
+#[must_use]
+pub fn overlap_glyph(state: OverlapState) -> char {
+    match state {
+        OverlapState::Overlapping => '+',
+        OverlapState::NotOverlapping => '~',
+        OverlapState::Unknown => 'x',
+        _ => '%',
+    }
+}
+
+/// The key for the derived band and overlap vocabulary above.
+///
+/// Kept separate from [`legend()`], never merged into it: the phase legend is printed
+/// whether or not a board has any bands to draw, and folding band vocabulary into it would
+/// put a key in front of a reader for rows that are not on screen. This one is only
+/// printed alongside an actual band section.
+#[must_use]
+pub fn band_legend() -> String {
+    "+ trading/overlapping  ~ not trading/not overlapping  x unknown  (derived — not a phase)"
+        .to_owned()
+}
+
+/// The label a band's row is printed under: its id and display name together, so an
+/// abbreviated id never stands alone without the human-readable name next to it.
+pub(crate) fn band_label(band: &SessionBand) -> String {
+    format!(
+        "{}: {}",
+        band.definition().id(),
+        band.definition().display_name()
+    )
+}
+
+/// The label an overlap's row is printed under: the two band ids it was computed from.
+pub(crate) fn overlap_label(overlap: &BandOverlap) -> String {
+    let [left, right] = overlap.bands();
+    format!("{left} x {right}")
+}
+
+/// Turns a stable identifier — [`BandState::as_str`] or [`OverlapState::as_str`]'s
+/// convention — into words for a person to read: `"not_trading"` becomes `"not trading"`.
+/// The one place in this crate that does that transform, so a status column or a hover
+/// title reads the vocabulary from the core rather than this crate re-matching either enum
+/// to spell out its own copy of the same words.
+fn word(identifier: &str) -> String {
+    identifier.replace('_', " ")
+}
+
+/// The word a [`BandState`] renders as in a status column or a hover title.
+pub(crate) fn band_state_word(state: BandState) -> String {
+    word(state.as_str())
+}
+
+/// The word an [`OverlapState`] renders as in a status column or a hover title.
+pub(crate) fn overlap_state_word(state: OverlapState) -> String {
+    word(state.as_str())
+}
+
+fn band_segment_at(band: &SessionBand, at: UtcInstant) -> Option<&BandSegment> {
+    band.segments()
+        .iter()
+        .find(|segment| segment.interval.contains(at))
+}
+
+fn overlap_segment_at(overlap: &BandOverlap, at: UtcInstant) -> Option<&OverlapSegment> {
+    overlap
+        .segments()
+        .iter()
+        .find(|segment| segment.interval.contains(at))
+}
+
+fn render_band_row(
+    band: &SessionBand,
+    interval: Interval,
+    columns: usize,
+    now: Option<&NowMarker>,
+) -> String {
+    let span = interval.start.saturating_nanos_until(interval.end).max(1);
+    let mut cells = vec![' '; columns];
+
+    for (column, cell) in cells.iter_mut().enumerate() {
+        let offset = span * as_i128(column) / as_i128(columns);
+        let at = interval.start.saturating_add_nanos(offset);
+        *cell = band_segment_at(band, at).map_or(' ', |segment| band_glyph(segment.state));
+    }
+
+    mark_now(&mut cells, interval, now, columns, span);
+
+    let rendered: String = cells.into_iter().collect();
+    format!("[{rendered}]")
+}
+
+fn render_overlap_row(
+    overlap: &BandOverlap,
+    interval: Interval,
+    columns: usize,
+    now: Option<&NowMarker>,
+) -> String {
+    let span = interval.start.saturating_nanos_until(interval.end).max(1);
+    let mut cells = vec![' '; columns];
+
+    for (column, cell) in cells.iter_mut().enumerate() {
+        let offset = span * as_i128(column) / as_i128(columns);
+        let at = interval.start.saturating_add_nanos(offset);
+        *cell = overlap_segment_at(overlap, at).map_or(' ', |segment| overlap_glyph(segment.state));
+    }
+
+    mark_now(&mut cells, interval, now, columns, span);
+
+    let rendered: String = cells.into_iter().collect();
+    format!("[{rendered}]")
+}
+
+fn band_status(band: &SessionBand, now: Option<&NowMarker>) -> String {
+    let Some(now) = now else {
+        return String::new();
+    };
+    match band_segment_at(band, now.instant) {
+        Some(segment) => band_state_word(segment.state),
+        None => "not shown".to_owned(),
+    }
+}
+
+fn overlap_status(overlap: &BandOverlap, now: Option<&NowMarker>) -> String {
+    let Some(now) = now else {
+        return String::new();
+    };
+    match overlap_segment_at(overlap, now.instant) {
+        Some(segment) => overlap_state_word(segment.state),
+        None => "not shown".to_owned(),
+    }
+}
+
+/// Renders the derived band rows, then the derived overlap rows, beneath the venue
+/// section.
+///
+/// Every row's label ends "(derived)" and both headings say DERIVED, because a band or an
+/// overlap is never a venue's published schedule (`market_time_core`'s `bands` module
+/// docs) — a reader scanning quickly must not be able to mistake one of these rows for a
+/// venue row above it. The glyphs come from [`band_glyph`]/[`overlap_glyph`], never
+/// [`glyph`], for the same reason. Only called when [`BandSection::is_empty`] is false, so
+/// a zero-band view never reaches this function at all.
+///
+/// `venue_label_width` is [`render`]'s own `label_width`, computed from the venue rows
+/// above. The `[` track for every row in a rendered board shares one axis down the page —
+/// that is the whole point of drawing a `now` marker at all — so this section's track must
+/// start at the same column the venue section's did, not at whatever column its own
+/// (typically shorter, "(derived)"-suffixed) labels would pick on their own. Taking the
+/// wider of the two keeps that column aligned regardless of which set of labels happens to
+/// be longer.
+fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usize) -> String {
+    let mut out = String::new();
+    let bands = &view.bands.bands;
+    let overlaps = &view.bands.overlaps;
+
+    let label_width = bands
+        .iter()
+        .map(|band| band_label(band).len())
+        .chain(overlaps.iter().map(|overlap| overlap_label(overlap).len()))
+        .max()
+        .unwrap_or(6)
+        .max(6)
+        .max(venue_label_width);
+
+    let _ = writeln!(out, "DERIVED BANDS (never a venue's published schedule)");
+    for band in bands {
+        let _ = writeln!(
+            out,
+            "{:label_width$}  {}  {} (derived)",
+            band_label(band),
+            render_band_row(band, view.interval, columns, view.now.as_ref()),
+            band_status(band, view.now.as_ref()),
+            label_width = label_width,
+        );
+        let _ = writeln!(
+            out,
+            "  derived  {}",
+            band.definition().derivation().reasoning()
+        );
+    }
+
+    if !overlaps.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "DERIVED OVERLAPS");
+        for overlap in overlaps {
+            let _ = writeln!(
+                out,
+                "{:label_width$}  {}  {} (derived)",
+                overlap_label(overlap),
+                render_overlap_row(overlap, view.interval, columns, view.now.as_ref()),
+                overlap_status(overlap, view.now.as_ref()),
+                label_width = label_width,
+            );
+            let _ = writeln!(out, "  derived  {}", overlap.derivation().reasoning());
+        }
+    }
+
+    let _ = writeln!(out);
+    let _ = writeln!(out, "  bands key:  {}", band_legend());
+
+    out
 }
 
 fn axis_labels(zone: &TimeZone, interval: Interval, columns: usize) -> String {
