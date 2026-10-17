@@ -781,3 +781,42 @@ fn a_no_schedule_band_segment_is_marked_in_the_default_svg_view_not_only_in_hove
         "and must not print the footnote when it names nothing on the page: {known_svg}"
     );
 }
+
+#[test]
+fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() {
+    // The same two views the SVG test above uses, rendered through the text board. That
+    // test is satisfied by `svg.rs`; this one guards the other renderer, which draws the
+    // same derived rows through `render_band_section` and originally dropped the
+    // `uncertainty: None` case entirely — satisfying `board.md`'s rule in one renderer
+    // and violating it in the other is the defect this covers.
+    let no_schedule = banded_view("UTC", "2027-02-01T00:00:00Z", "2027-02-02T00:00:00Z", None);
+    let text = market_time_board::render(&no_schedule);
+
+    let heading_at = text
+        .find("DERIVED BANDS")
+        .expect("the band section is drawn");
+
+    assert!(
+        text[heading_at..].contains("no schedule is known for this stretch"),
+        "a segment with nothing at all known must state that absence in the band section's \
+         own key, in the default view, not only in the SVG or a hover title: {text}"
+    );
+
+    // A fully in-coverage day has nothing to mark, so the line must not appear — the
+    // statement is conditional on some segment's uncertainty actually being `None`.
+    let all_known = banded_view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    let known_text = market_time_board::render(&all_known);
+    let known_heading_at = known_text
+        .find("DERIVED BANDS")
+        .expect("the band section is drawn");
+
+    assert!(
+        !known_text[known_heading_at..].contains("no schedule is known for this stretch"),
+        "and must not print the line when it names nothing on the page: {known_text}"
+    );
+}

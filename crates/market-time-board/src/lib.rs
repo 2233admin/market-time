@@ -686,6 +686,31 @@ fn overlap_segment_at(overlap: &BandOverlap, at: UtcInstant) -> Option<&OverlapS
         .find(|segment| segment.interval.contains(at))
 }
 
+/// Whether any column of a band row lands on a segment whose `uncertainty` is `None` —
+/// "no schedule known for this stretch."
+///
+/// Mirrors `svg::any_no_schedule`'s test so the text footnote and the SVG dot/footnote
+/// agree on when that absence needs naming. `board.md` requires the statement in the
+/// default view and forbids printing it for a render where no segment's uncertainty is
+/// `None`, so both renderers must reach the same verdict.
+fn band_row_has_no_schedule(band: &SessionBand, interval: Interval, columns: usize) -> bool {
+    let span = interval.start.saturating_nanos_until(interval.end).max(1);
+    (0..columns).any(|column| {
+        let offset = span * as_i128(column) / as_i128(columns);
+        band_segment_at(band, interval.start.saturating_add_nanos(offset))
+            .is_some_and(|segment| segment.uncertainty.is_none())
+    })
+}
+
+fn overlap_row_has_no_schedule(overlap: &BandOverlap, interval: Interval, columns: usize) -> bool {
+    let span = interval.start.saturating_nanos_until(interval.end).max(1);
+    (0..columns).any(|column| {
+        let offset = span * as_i128(column) / as_i128(columns);
+        overlap_segment_at(overlap, interval.start.saturating_add_nanos(offset))
+            .is_some_and(|segment| segment.uncertainty.is_none())
+    })
+}
+
 fn render_band_row(
     band: &SessionBand,
     interval: Interval,
@@ -780,7 +805,9 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
         .max(venue_label_width);
 
     let _ = writeln!(out, "DERIVED BANDS (never a venue's published schedule)");
+    let mut any_no_schedule = false;
     for band in bands {
+        any_no_schedule |= band_row_has_no_schedule(band, view.interval, columns);
         let _ = writeln!(
             out,
             "{:label_width$}  {}  {} (derived)",
@@ -800,6 +827,7 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
         let _ = writeln!(out);
         let _ = writeln!(out, "DERIVED OVERLAPS");
         for overlap in overlaps {
+            any_no_schedule |= overlap_row_has_no_schedule(overlap, view.interval, columns);
             let _ = writeln!(
                 out,
                 "{:label_width$}  {}  {} (derived)",
@@ -814,6 +842,17 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
 
     let _ = writeln!(out);
     let _ = writeln!(out, "  bands key:  {}", band_legend());
+    // `board.md` requires the absent-schedule statement in the default view, and equally
+    // requires it *not* be printed when no segment's uncertainty is `None` — so this line
+    // is unconditional on layout and conditional only on that fact. Without it the text
+    // board renders an all-unknown stretch as `x`, the same as a merely-unknown state,
+    // which is the one thing that rule forbids.
+    if any_no_schedule {
+        let _ = writeln!(
+            out,
+            "  x here means no schedule is known for this stretch — a different claim from an unknown state"
+        );
+    }
 
     out
 }
