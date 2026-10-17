@@ -114,6 +114,19 @@ fn run(args: &[String]) -> Result<String, String> {
         .ok_or_else(|| "--dataset <path> is required".to_owned())?;
     let dataset = load_dataset(&dataset_path).map_err(|error| error.to_string())?;
     let ruleset = &dataset.ruleset;
+
+    // `venues` lists identifiers from the dataset and uses no instant, so an `--at` here
+    // would be validated and then silently discarded — the parser accepts it and the result
+    // is byte-identical with and without it. Refusing it is the honest answer: a caller
+    // passing `--at` expects it to matter. This is checked before the clock is read, so the
+    // command also stops paying for a host-clock read it never uses.
+    if command == "venues" && options.at.is_some() {
+        return Err(format!(
+            "`venues` does not take --at: it lists the dataset's venues, and no answer it \
+             prints depends on an instant\n\n{USAGE}"
+        ));
+    }
+
     let now = options.resolve_now()?;
 
     match command {

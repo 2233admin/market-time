@@ -920,6 +920,33 @@ fn every_surface_reporting_now_states_the_host_clock_discipline() {
 }
 
 #[test]
+fn venues_refuses_at_rather_than_accepting_and_ignoring_it() {
+    // `venues` lists identifiers from the dataset and uses no instant. It used to accept
+    // --at, exit 0, and print output byte-identical to the no-flag run — the flag was
+    // validated and then discarded, which tells a caller their --at mattered when it did
+    // not. Refusing is the honest answer.
+    let with_at = run(&["venues", "--dataset", &fixture(), "--at", "now"]);
+    assert!(
+        !with_at.status.success(),
+        "venues must not accept an --at its answer does not depend on"
+    );
+    assert!(
+        stderr(&with_at).contains("does not take --at"),
+        "the refusal must say which flag and why: {}",
+        stderr(&with_at)
+    );
+
+    // The flagless form is unchanged: this rejects a misuse, not the command.
+    let plain = run(&["venues", "--dataset", &fixture()]);
+    assert!(plain.status.success(), "{}", stderr(&plain));
+    assert!(
+        stdout(&plain).contains("SYNTH-ALWAYS"),
+        "venues still lists the dataset's venues: {}",
+        stdout(&plain)
+    );
+}
+
+#[test]
 fn an_unknown_band_id_fails_loudly() {
     let output = run(&["bands", "--dataset", &fixture(), "--band", "no-such-band"]);
     assert!(
