@@ -796,14 +796,29 @@ fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() 
         .find("DERIVED BANDS")
         .expect("the band section is drawn");
 
+    // `board.md` asks for a marker on the affected row, not only a footnote: a row can hold
+    // an ordinary unknown-with-uncertainty stretch and a no-schedule one, both otherwise
+    // rendering `x`.
+    assert!(
+        text[heading_at..].contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "a segment with nothing at all known must be marked on its own row in the default \
+         view, distinctly from `x` (an unknown state): {text}"
+    );
     assert!(
         text[heading_at..].contains("no schedule is known for this stretch"),
-        "a segment with nothing at all known must state that absence in the band section's \
-         own key, in the default view, not only in the SVG or a hover title: {text}"
+        "and the section must state that absence in its own key, in the same wording the \
+         hover title already uses: {text}"
+    );
+    // The footnote names the marker, or it does not say which cell it refers to.
+    assert!(
+        text[heading_at..].contains("@ no schedule is known for this stretch"),
+        "the footnote must name the marker glyph so a reader can tell which cell it is \
+         about: {text}"
     );
 
-    // A fully in-coverage day has nothing to mark, so the line must not appear — the
-    // statement is conditional on some segment's uncertainty actually being `None`.
+    // A fully in-coverage day has nothing to mark, so neither the marker nor the line may
+    // appear — the statement is conditional on some drawn segment's uncertainty being
+    // `None`, which board.md lines 147-149 make explicit.
     let all_known = banded_view(
         "UTC",
         "2026-07-30T00:00:00Z",
@@ -815,6 +830,10 @@ fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() 
         .find("DERIVED BANDS")
         .expect("the band section is drawn");
 
+    assert!(
+        !known_text[known_heading_at..].contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "a fully in-coverage day has nothing to mark: {known_text}"
+    );
     assert!(
         !known_text[known_heading_at..].contains("no schedule is known for this stretch"),
         "and must not print the line when it names nothing on the page: {known_text}"

@@ -686,50 +686,56 @@ fn overlap_segment_at(overlap: &BandOverlap, at: UtcInstant) -> Option<&OverlapS
         .find(|segment| segment.interval.contains(at))
 }
 
-/// Whether any column of a band row lands on a segment whose `uncertainty` is `None` —
-/// "no schedule known for this stretch."
+/// The glyph a band cell renders as when its segment's `uncertainty` is `None` — nothing at
+/// all is known about that stretch, which is a different claim from `x`'s "the state is not
+/// known."
 ///
-/// Mirrors `svg::any_no_schedule`'s test so the text footnote and the SVG dot/footnote
-/// agree on when that absence needs naming. `board.md` requires the statement in the
-/// default view and forbids printing it for a render where no segment's uncertainty is
-/// `None`, so both renderers must reach the same verdict.
-fn band_row_has_no_schedule(band: &SessionBand, interval: Interval, columns: usize) -> bool {
-    let span = interval.start.saturating_nanos_until(interval.end).max(1);
-    (0..columns).any(|column| {
-        let offset = span * as_i128(column) / as_i128(columns);
-        band_segment_at(band, interval.start.saturating_add_nanos(offset))
-            .is_some_and(|segment| segment.uncertainty.is_none())
-    })
-}
+/// `board.md` requires the absence to be marked **on the affected row**, not only stated in
+/// the section footnote: a row can hold both an ordinary unknown-with-uncertainty stretch
+/// and a no-schedule stretch, both otherwise rendering `x`, and a footnote alone would not
+/// say which is which.
+///
+/// `@` is used because it belongs to neither existing vocabulary — the venue legend
+/// (`glyph`: `. - = # : _ ! ? *`) nor the band/overlap one (`+ ~ x %`). `!` in particular
+/// would be wrong here: it already means "halt" in the venue legend, which
+/// [`band_glyph`]'s own doc comment forbids reusing for a band row.
+pub const BAND_NO_SCHEDULE_GLYPH: char = '@';
 
-fn overlap_row_has_no_schedule(overlap: &BandOverlap, interval: Interval, columns: usize) -> bool {
-    let span = interval.start.saturating_nanos_until(interval.end).max(1);
-    (0..columns).any(|column| {
-        let offset = span * as_i128(column) / as_i128(columns);
-        overlap_segment_at(overlap, interval.start.saturating_add_nanos(offset))
-            .is_some_and(|segment| segment.uncertainty.is_none())
-    })
-}
-
+/// Renders one derived band row, returning the row and whether any drawn cell carried
+/// [`BAND_NO_SCHEDULE_GLYPH`].
+///
+/// The flag is computed from the cells actually drawn, not from a separate scan of the
+/// band's segments. `board.md` forbids the section footnote when no segment's uncertainty
+/// is `None`, and a scan over all segments would print it for a `None` stretch that falls
+/// entirely outside the drawn interval — a line naming nothing on the page. Deriving the
+/// flag from the cells keeps the footnote and the marker describing the same thing.
 fn render_band_row(
     band: &SessionBand,
     interval: Interval,
     columns: usize,
     now: Option<&NowMarker>,
-) -> String {
+) -> (String, bool) {
     let span = interval.start.saturating_nanos_until(interval.end).max(1);
     let mut cells = vec![' '; columns];
+    let mut any_no_schedule = false;
 
     for (column, cell) in cells.iter_mut().enumerate() {
         let offset = span * as_i128(column) / as_i128(columns);
         let at = interval.start.saturating_add_nanos(offset);
-        *cell = band_segment_at(band, at).map_or(' ', |segment| band_glyph(segment.state));
+        *cell = band_segment_at(band, at).map_or(' ', |segment| {
+            if segment.uncertainty.is_none() {
+                any_no_schedule = true;
+                BAND_NO_SCHEDULE_GLYPH
+            } else {
+                band_glyph(segment.state)
+            }
+        });
     }
 
     mark_now(&mut cells, interval, now, columns, span);
 
     let rendered: String = cells.into_iter().collect();
-    format!("[{rendered}]")
+    (format!("[{rendered}]"), any_no_schedule)
 }
 
 fn render_overlap_row(
@@ -737,20 +743,28 @@ fn render_overlap_row(
     interval: Interval,
     columns: usize,
     now: Option<&NowMarker>,
-) -> String {
+) -> (String, bool) {
     let span = interval.start.saturating_nanos_until(interval.end).max(1);
     let mut cells = vec![' '; columns];
+    let mut any_no_schedule = false;
 
     for (column, cell) in cells.iter_mut().enumerate() {
         let offset = span * as_i128(column) / as_i128(columns);
         let at = interval.start.saturating_add_nanos(offset);
-        *cell = overlap_segment_at(overlap, at).map_or(' ', |segment| overlap_glyph(segment.state));
+        *cell = overlap_segment_at(overlap, at).map_or(' ', |segment| {
+            if segment.uncertainty.is_none() {
+                any_no_schedule = true;
+                BAND_NO_SCHEDULE_GLYPH
+            } else {
+                overlap_glyph(segment.state)
+            }
+        });
     }
 
     mark_now(&mut cells, interval, now, columns, span);
 
     let rendered: String = cells.into_iter().collect();
-    format!("[{rendered}]")
+    (format!("[{rendered}]"), any_no_schedule)
 }
 
 fn band_status(band: &SessionBand, now: Option<&NowMarker>) -> String {
@@ -807,12 +821,14 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
     let _ = writeln!(out, "DERIVED BANDS (never a venue's published schedule)");
     let mut any_no_schedule = false;
     for band in bands {
-        any_no_schedule |= band_row_has_no_schedule(band, view.interval, columns);
+        let (row, row_has_no_schedule) =
+            render_band_row(band, view.interval, columns, view.now.as_ref());
+        any_no_schedule |= row_has_no_schedule;
         let _ = writeln!(
             out,
             "{:label_width$}  {}  {} (derived)",
             band_label(band),
-            render_band_row(band, view.interval, columns, view.now.as_ref()),
+            row,
             band_status(band, view.now.as_ref()),
             label_width = label_width,
         );
@@ -827,12 +843,14 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
         let _ = writeln!(out);
         let _ = writeln!(out, "DERIVED OVERLAPS");
         for overlap in overlaps {
-            any_no_schedule |= overlap_row_has_no_schedule(overlap, view.interval, columns);
+            let (row, row_has_no_schedule) =
+                render_overlap_row(overlap, view.interval, columns, view.now.as_ref());
+            any_no_schedule |= row_has_no_schedule;
             let _ = writeln!(
                 out,
                 "{:label_width$}  {}  {} (derived)",
                 overlap_label(overlap),
-                render_overlap_row(overlap, view.interval, columns, view.now.as_ref()),
+                row,
                 overlap_status(overlap, view.now.as_ref()),
                 label_width = label_width,
             );
@@ -842,15 +860,16 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
 
     let _ = writeln!(out);
     let _ = writeln!(out, "  bands key:  {}", band_legend());
-    // `board.md` requires the absent-schedule statement in the default view, and equally
-    // requires it *not* be printed when no segment's uncertainty is `None` — so this line
-    // is unconditional on layout and conditional only on that fact. Without it the text
-    // board renders an all-unknown stretch as `x`, the same as a merely-unknown state,
-    // which is the one thing that rule forbids.
+    // `board.md` requires the absent-schedule statement in the default view, and requires it
+    // *not* be printed when no drawn segment's uncertainty is `None` — so this is
+    // conditional on a `@` actually appearing in a row above, never on layout. The line
+    // names the `@` glyph specifically: the footnote alone would not say which `x`-looking
+    // cell it referred to when a row holds both an ordinary unknown stretch and a
+    // no-schedule one.
     if any_no_schedule {
         let _ = writeln!(
             out,
-            "  x here means no schedule is known for this stretch — a different claim from an unknown state"
+            "  {BAND_NO_SCHEDULE_GLYPH} no schedule is known for this stretch — a different claim from x (unknown state)"
         );
     }
 
