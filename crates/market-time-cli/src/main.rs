@@ -175,7 +175,7 @@ fn evidence_command(
         .ok_or_else(|| format!("no segment covers {} for {venue}", show(now.instant)))?;
 
     if options.format == Format::Json {
-        return Ok(pretty(&detail_json(&detail)));
+        return Ok(pretty(&detail_json(&detail, &now)));
     }
 
     let mut out = format!("{venue} at {}\n", show(now.instant));
@@ -222,8 +222,17 @@ fn evidence_command(
     Ok(out)
 }
 
-fn detail_json(detail: &SegmentDetail) -> Value {
+/// The machine shape of one segment's evidence.
+///
+/// Carries `at` and `clock` for the same reason the text shape closes with an `as of` line:
+/// `cli.md` makes stating the host clock's discipline a CLI-wide obligation whenever `--at
+/// now` read the host clock, and its own output-shape rule says `--format` changes
+/// presentation, not which fields exist — so the text shape having the line and this one
+/// omitting the field would be a format-dependent fact, which is the thing that rule bans.
+fn detail_json(detail: &SegmentDetail, now: &NowMarker) -> Value {
     json!({
+        "at": show(now.instant),
+        "clock": now.discipline.describe(),
         "venue": detail.venue.to_string(),
         "interval": {
             "start": show(detail.interval.start),
@@ -515,6 +524,8 @@ fn timeline_command(
             .collect();
 
         return Ok(pretty(&json!({
+            "at": show(now.instant),
+            "clock": now.discipline.describe(),
             "venue": venue.to_string(),
             "interval": {"start": show(interval.start), "end": show(interval.end)},
             "tiles_interval": timeline.tiles_interval(),
@@ -543,6 +554,10 @@ fn timeline_command(
         "  tiles the queried interval: {}\n",
         timeline.tiles_interval()
     ));
+    // The same obligation `phase`, `evidence` and `bands` discharge: where this surface's
+    // window came from the host clock, say how well that instant is known rather than
+    // letting a reader take the rendered boundaries as exact.
+    out.push_str(&format!("  as of    {}\n", now.discipline.describe()));
     Ok(out)
 }
 
@@ -712,16 +727,16 @@ fn bands_text(
     empty_reason: Option<BandsEmptyReason>,
     now: &NowMarker,
 ) -> String {
+    // The clock statement comes first and unconditionally: an empty result is still an
+    // answer produced from an instant this shell read, and `cli.md` binds the surface
+    // regardless of how much it found to say. Returning the reason alone would make the
+    // obligation depend on dataset contents.
+    let mut out = format!("as of {}\n", now.discipline.describe());
+
     if let Some(reason) = empty_reason {
-        return format!("{}\n", reason.message());
+        out.push_str(&format!("{}\n", reason.message()));
+        return out;
     }
-
-    let mut out = String::new();
-
-    // The same closing line `phase_command` and `evidence_command` print: `cli.md` binds
-    // every CLI surface that reports "now" to state how well that instant is known, so this
-    // command cannot present a host-clock reading as exact by saying nothing.
-    out.push_str(&format!("as of {}\n", now.discipline.describe()));
 
     for band in bands {
         let definition = band.definition();

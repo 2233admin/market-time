@@ -856,12 +856,67 @@ fn bands_text_says_so_when_the_dataset_declares_no_bands() {
     assert!(output.status.success(), "{}", stderr(&output));
 
     let text = stdout(&output);
-    assert_eq!(
-        text.trim_end(),
-        "this dataset declares no session bands",
+    assert!(
+        text.contains("this dataset declares no session bands"),
         "the bands command exists to talk about bands, so an empty result must say why \
          rather than printing a bare blank line: {text:?}"
     );
+    // An empty dataset is still an answer produced from an instant this shell read, so the
+    // clock statement is owed regardless of how little there was to report — it must not
+    // depend on dataset contents.
+    assert!(
+        text.contains("as of"),
+        "the clock statement is owed even when the dataset declares no bands: {text:?}"
+    );
+}
+
+#[test]
+fn every_surface_reporting_now_states_the_host_clock_discipline() {
+    // `cli.md`'s clock-discipline rule is CLI-wide, not `phase`-only: every surface that
+    // reads the host clock for `--at now` must say how well that instant is known. Each of
+    // these commands was silent in at least one format before this rule was applied to it.
+    let dataset = fixture();
+    let cases: [&[&str]; 4] = [
+        &[
+            "evidence",
+            "--venue",
+            "SYNTH-ALWAYS",
+            "--at",
+            "now",
+            "--format",
+            "json",
+        ],
+        &["timeline", "--venue", "SYNTH-ALWAYS", "--at", "now"],
+        &[
+            "timeline",
+            "--venue",
+            "SYNTH-ALWAYS",
+            "--at",
+            "now",
+            "--format",
+            "json",
+        ],
+        &["bands", "--at", "now"],
+    ];
+
+    for case in cases {
+        let mut args = vec![case[0], "--dataset", &dataset];
+        args.extend_from_slice(&case[1..]);
+        let output = run(&args);
+        assert!(
+            output.status.success(),
+            "{} -- {}",
+            case[0],
+            stderr(&output)
+        );
+
+        let text = stdout(&output);
+        assert!(
+            text.contains("discipline unmeasured") || text.contains("\"clock\""),
+            "`{}` reports now but does not state the host clock's discipline: {text}",
+            case.join(" ")
+        );
+    }
 }
 
 #[test]
