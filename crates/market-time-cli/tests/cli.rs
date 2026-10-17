@@ -606,6 +606,65 @@ fn bands_text_names_every_bands_derivation_and_reports_a_real_overlap() {
 }
 
 #[test]
+fn bands_at_now_states_the_host_clock_discipline_it_read() {
+    // `cli.md`'s "clock discipline applies to the CLI, not only the board" judgment call:
+    // any surface reporting "now" MUST carry the host clock's discipline bounds rather than
+    // presenting the instant as exact. `phase` already did; `bands` originally said nothing,
+    // which is the defect this covers. Both formats must carry it, because `--format`
+    // changes presentation, not which facts exist.
+    let json = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "now",
+        "--format",
+        "json",
+    ]);
+    assert!(json.status.success(), "{}", stderr(&json));
+    let json_text = stdout(&json);
+    assert!(
+        json_text.contains("\"clock\""),
+        "bands --at now --format json must carry the clock discipline it read: {json_text}"
+    );
+    assert!(
+        json_text.contains("discipline unmeasured"),
+        "the host clock here has no NTP/PTP bound, and that absence must be stated rather \
+         than omitted: {json_text}"
+    );
+
+    let text = run(&["bands", "--dataset", &fixture(), "--at", "now"]);
+    assert!(text.status.success(), "{}", stderr(&text));
+    let text_out = stdout(&text);
+    assert!(
+        text_out.contains("as of host clock discipline unmeasured"),
+        "bands --at now --format text must state the same bound, not print a bare now: \
+         {text_out}"
+    );
+}
+
+#[test]
+fn bands_with_an_explicit_at_says_no_clock_was_read() {
+    // The other half of the same rule: an explicit `--at` consulted no host clock, and the
+    // output must say so rather than going silent — a reader who sees no clock line at all
+    // cannot tell "no clock was read" from "the tool forgot to mention it".
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-11-27T14:00:00Z",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(
+        text.contains("as of instant supplied, not read from a clock"),
+        "an explicit --at must state that no host clock was consulted: {text}"
+    );
+}
+
+#[test]
 fn bands_json_marks_every_band_and_overlap_derived_and_never_renders_a_null_uncertainty_as_exact() {
     let output = run(&[
         "bands",

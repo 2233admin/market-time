@@ -574,10 +574,10 @@ fn bands_command(
         .then_some(BandsEmptyReason::DatasetDeclaresNone);
 
     if options.format == Format::Json {
-        return Ok(pretty(&bands_json(&bands, &overlaps, empty_reason)));
+        return Ok(pretty(&bands_json(&bands, &overlaps, empty_reason, &now)));
     }
 
-    Ok(bands_text(&bands, &overlaps, empty_reason))
+    Ok(bands_text(&bands, &overlaps, empty_reason, &now))
 }
 
 /// Why `bands_command` has nothing to report: the `bands` command exists to talk about
@@ -604,12 +604,21 @@ impl BandsEmptyReason {
 /// `no_bands_reason` is always present as a key, `null` when `bands` is non-empty, a message
 /// when it is not — so an empty-bands consumer sees why in the shape itself, rather than
 /// having to infer it from an absent key.
+///
+/// `clock` carries the host clock's discipline bounds whenever `--at now` read the host
+/// clock, exactly as `phase_command` does. `cli.md` makes this a CLI-wide obligation, not a
+/// `phase`-only one: a surface that reports "now" must never present that instant as exact.
+/// It is named for the `NowMarker` behind it, so an explicit `--at` states that no host
+/// clock was consulted rather than omitting the key and inviting the reader to assume one.
 fn bands_json(
     bands: &[SessionBand],
     overlaps: &[BandOverlap],
     empty_reason: Option<BandsEmptyReason>,
+    now: &NowMarker,
 ) -> Value {
     json!({
+        "at": show(now.instant),
+        "clock": now.discipline.describe(),
         "bands": bands.iter().map(band_json).collect::<Vec<Value>>(),
         "overlaps": overlaps.iter().map(overlap_json).collect::<Vec<Value>>(),
         "no_bands_reason": empty_reason.map(BandsEmptyReason::message),
@@ -701,12 +710,18 @@ fn bands_text(
     bands: &[SessionBand],
     overlaps: &[BandOverlap],
     empty_reason: Option<BandsEmptyReason>,
+    now: &NowMarker,
 ) -> String {
     if let Some(reason) = empty_reason {
         return format!("{}\n", reason.message());
     }
 
     let mut out = String::new();
+
+    // The same closing line `phase_command` and `evidence_command` print: `cli.md` binds
+    // every CLI surface that reports "now" to state how well that instant is known, so this
+    // command cannot present a host-clock reading as exact by saying nothing.
+    out.push_str(&format!("as of {}\n", now.discipline.describe()));
 
     for band in bands {
         let definition = band.definition();
