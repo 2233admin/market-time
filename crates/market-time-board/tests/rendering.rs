@@ -805,15 +805,17 @@ fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() 
          view, distinctly from `x` (an unknown state): {text}"
     );
     assert!(
-        text[heading_at..].contains("no schedule is known for this stretch"),
-        "and the section must state that absence in its own key, in the same wording the \
-         hover title already uses: {text}"
+        text[heading_at..].contains("no schedule"),
+        "and the section must state that absence in its own key, in the default view rather \
+         than only on hover: {text}"
     );
-    // The footnote names the marker, or it does not say which cell it refers to.
+    // The footnote names the marker when the grid could draw one, or says plainly that it
+    // could not; either way it must not point at a glyph the row does not carry.
     assert!(
-        text[heading_at..].contains("@ no schedule is known for this stretch"),
-        "the footnote must name the marker glyph so a reader can tell which cell it is \
-         about: {text}"
+        text[heading_at..].contains("marks a stretch with no schedule known")
+            || text[heading_at..].contains("no cell marks it"),
+        "the section's line must say which cell it means, or that the grid could not point \
+         at the stretch: {text}"
     );
 
     // A fully in-coverage day has nothing to mark, so neither the marker nor the line may
@@ -835,7 +837,7 @@ fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() 
         "a fully in-coverage day has nothing to mark: {known_text}"
     );
     assert!(
-        !known_text[known_heading_at..].contains("no schedule is known for this stretch"),
+        !known_text[known_heading_at..].contains("no schedule"),
         "and must not print the line when it names nothing on the page: {known_text}"
     );
 }
@@ -935,13 +937,13 @@ fn the_now_marker_does_not_erase_a_no_schedule_marker() {
         "the instant marker must not erase the only absence marker on the row: {band_row}"
     );
     assert!(
-        with_now.contains("no schedule is known for this stretch"),
+        with_now.contains("marks a stretch with no schedule known"),
         "and the footnote naming it must agree with the row: {with_now}"
     );
 }
 
 #[test]
-fn an_unsampled_none_stretch_still_marks_its_own_column() {
+fn an_unsampled_none_stretch_is_stated_without_claiming_a_marker() {
     // A `None` stretch narrower than one column: the cell loop draws the state glyph for the
     // column it falls in — `x`, indistinguishable from an ordinary unknown — so the row would
     // carry no `@` at all while the footnote named one. `board.md` requires both. The marker
@@ -1023,21 +1025,111 @@ fn an_unsampled_none_stretch_still_marks_its_own_column() {
         .find(|line| line.starts_with("band-gap:"))
         .expect("the band row is drawn");
 
-    // The row is 48 columns of `x` with the gap far narrower than one of them, so without the
-    // repair there is no `@` anywhere; with it, exactly one, on the gap's own column.
+    // The row is 48 columns of `x` and the gap is far narrower than one of them. No column
+    // samples inside the stretch, so no cell can truthfully be marked: the column the
+    // stretch begins in samples 12:00, which the data reports as known, and marking it would
+    // put "no schedule is known here" on a stretch that is exact — the one error this
+    // product exists to prevent, and worse than the missing marker it would replace.
     assert!(
-        row.contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
-        "a sub-column `None` stretch must still mark its own column: {row}"
+        !row.contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "no column samples inside the stretch, so none may be marked: {row}"
     );
+
+    // The statement itself must survive that, and must not pretend a marker exists.
+    assert!(
+        text.contains("no schedule"),
+        "the stretch must still be stated when the grid cannot point at it: {text}"
+    );
+    assert!(
+        text.contains("no cell marks it"),
+        "and the line must say the grid could not point at it rather than naming a glyph \
+         that is not on the row: {text}"
+    );
+    assert!(
+        !text.contains("marks a stretch with no schedule known"),
+        "the line must not name a marker the row does not carry: {text}"
+    );
+}
+
+#[test]
+fn a_stretch_a_column_does_sample_is_marked_and_may_be_narrow() {
+    // The counterpart: when some column's sample falls inside the `None` stretch the marker
+    // is drawn, even though the stretch is far narrower than that column. 71 columns puts a
+    // sample at 12:10:08, inside the ten-second gap from this same fixture.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-07-30T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "A", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-11-27T12:10:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-11-27"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/a", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            },
+            {
+              "venue": "B", "home_zone": "UTC",
+              "coverage": {"start": "2026-11-27T12:10:10Z", "end": "2026-12-31T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-11-27", "end": "2026-12-30"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/b", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    let interval = Interval::new(
+        instant("2026-11-27T00:00:00Z"),
+        instant("2026-11-28T00:00:00Z"),
+    )
+    .expect("valid interval");
+    let a = VenueId::new("A").expect("valid identifier");
+    let b = VenueId::new("B").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("band-gap").expect("valid identifier"),
+        "Gap Band",
+        vec![a.clone(), b.clone()],
+        DerivationNote::new("test fixture grouping").expect("non-empty"),
+    )
+    .expect("valid definition");
+    let timelines = vec![
+        resolve_timeline(interval, &a, &ruleset),
+        resolve_timeline(interval, &b, &ruleset),
+    ];
+    let band = derive_band(&definition, &timelines).expect("the timelines derive");
+
+    let mut board = view("UTC", "2026-11-27T00:00:00Z", "2026-11-28T00:00:00Z", None);
+    board.columns = 71;
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+
+    let text = render(&board);
+    let row = text
+        .lines()
+        .find(|line| line.starts_with("band-gap:"))
+        .expect("the band row is drawn");
     assert_eq!(
         row.matches(market_time_board::BAND_NO_SCHEDULE_GLYPH)
             .count(),
         1,
-        "and mark it once, not scattering markers across the row: {row}"
+        "a column samples inside the stretch, so exactly one cell is marked: {row}"
     );
     assert!(
-        text.contains("no schedule is known for this stretch"),
-        "with the footnote naming that marker: {text}"
+        text.contains("marks a stretch with no schedule known"),
+        "and the line names that marker: {text}"
     );
 }
 
@@ -1091,11 +1183,8 @@ fn a_no_schedule_stretch_shorter_than_one_column_still_reaches_the_footnote() {
     };
 
     let text = render(&board);
-    let heading_at = text
-        .find("DERIVED BANDS")
-        .expect("the band section is drawn");
     assert!(
-        text[heading_at..].contains("no schedule is known for this stretch"),
+        text.contains("no schedule"),
         "a `None` stretch inside the window must be stated even when no column samples it: \
          {text}"
     );

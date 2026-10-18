@@ -786,45 +786,74 @@ fn render_band_row(
     );
     mark_now(&mut cells, interval, now, columns, span);
     if let Some(stretch) = no_schedule {
-        place_missing_marker(&mut cells, stretch, interval, columns, span);
+        place_missing_marker(&mut cells, stretch, interval, columns, span, now);
     }
 
     let rendered: String = cells.into_iter().collect();
     (format!("[{rendered}]"), no_schedule.is_some())
 }
 
-/// Puts a [`BAND_NO_SCHEDULE_GLYPH`] on a row that should carry one but does not.
+/// Puts a [`BAND_NO_SCHEDULE_GLYPH`] on a row that should carry one but does not, and only
+/// where saying so is true.
 ///
 /// `board.md` asks for a marker on the affected row *and* a footnote, and it forbids the
 /// footnote when nothing on the page carries the marker. A `None` stretch narrower than one
 /// column is never sampled, so the cell loop draws a state glyph for the column it falls in
 /// and no `@` anywhere, and the footnote would name a glyph the row does not show.
 ///
-/// The stretch's own column is marked, replacing whatever state glyph the cell loop drew
-/// there: that column *is* inside the stretch — the grid simply could not show how narrow it
-/// is — so `@` is the accurate glyph for it, not an approximation. The instant marker is the
-/// one cell never taken, because it carries a different claim and `mark_now` runs first.
+/// The marker may only go in a column whose **sampled instant** lies inside the stretch. The
+/// column a stretch starts in is not necessarily such a column: with 24 hours in 72 columns
+/// each column samples 20 minutes in, so a stretch beginning at 12:10 falls in the column
+/// that samples 12:00 — a cell the JSON reports as known. Marking that column would put "no
+/// schedule is known here" on a stretch the data says is exact, which is the one error this
+/// product exists to prevent, and worse than the missing marker it replaces.
+///
+/// When no column samples inside the stretch, no marker is placed and the caller's footnote
+/// alone carries the statement. That is the honest outcome: the grid cannot point at the
+/// stretch, so it does not pretend to.
 fn place_missing_marker(
     cells: &mut [char],
     stretch: Interval,
     interval: Interval,
     columns: usize,
     span: i128,
+    now: Option<&NowMarker>,
 ) {
-    if cells.is_empty() || cells.contains(&BAND_NO_SCHEDULE_GLYPH) {
+    if cells.is_empty() || columns == 0 || cells.contains(&BAND_NO_SCHEDULE_GLYPH) {
         return;
     }
-    let offset = interval.start.saturating_nanos_until(stretch.start);
-    let column = usize::try_from(offset * as_i128(columns) / span).unwrap_or(0);
-    let column = column.min(cells.len() - 1);
 
-    // Walk outward so that if the stretch's own column happens to hold the instant marker,
-    // the nearest cell inside the stretch still carries the marker rather than the row
-    // losing it. Only `|` is never overwritten.
-    for distance in 0..cells.len() {
-        for candidate in [column.checked_sub(distance), column.checked_add(distance)] {
+    // Column `c` samples `interval.start + span * c / columns`, the same expression the cell
+    // loop uses, so a candidate is only accepted if that instant is inside the stretch.
+    let now_column = now
+        .filter(|now| interval.contains(now.instant))
+        .and_then(|now| {
+            let offset = interval.start.saturating_nanos_until(now.instant);
+            usize::try_from(offset * as_i128(columns) / span).ok()
+        });
+
+    let inside = |column: usize| {
+        let offset = span * as_i128(column) / as_i128(columns);
+        stretch.contains(interval.start.saturating_add_nanos(offset))
+    };
+
+    // Nearest inside-column to the stretch's own start first, so the marker sits as close to
+    // the stretch as the grid allows. The instant marker's cell is skipped: it carries a
+    // different claim.
+    let start_column = usize::try_from(
+        interval.start.saturating_nanos_until(stretch.start) * as_i128(columns) / span,
+    )
+    .unwrap_or(0)
+    .min(columns - 1);
+
+    for distance in 0..columns {
+        for candidate in [
+            start_column.checked_sub(distance),
+            start_column.checked_add(distance),
+        ] {
             if let Some(index) = candidate.filter(|index| *index < cells.len())
-                && cells[index] != '|'
+                && inside(index)
+                && Some(index) != now_column
             {
                 cells[index] = BAND_NO_SCHEDULE_GLYPH;
                 return;
@@ -862,7 +891,7 @@ fn render_overlap_row(
     );
     mark_now(&mut cells, interval, now, columns, span);
     if let Some(stretch) = no_schedule {
-        place_missing_marker(&mut cells, stretch, interval, columns, span);
+        place_missing_marker(&mut cells, stretch, interval, columns, span, now);
     }
 
     let rendered: String = cells.into_iter().collect();
@@ -963,15 +992,27 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
     let _ = writeln!(out);
     let _ = writeln!(out, "  bands key:  {}", band_legend());
     // `board.md` requires the absent-schedule statement in the default view, and requires it
-    // *not* be printed when no drawn segment's uncertainty is `None` — so this is
-    // conditional on a `@` actually appearing in a row above, never on layout. The line
-    // names the `@` glyph specifically: the footnote alone would not say which `x`-looking
-    // cell it referred to when a row holds both an ordinary unknown stretch and a
-    // no-schedule one.
+    // *not* be printed when no drawn segment's uncertainty is `None` — so this is conditional
+    // on such a stretch being on the page, never on layout.
+    //
+    // The wording depends on whether the grid could actually point at the stretch. Where it
+    // could, the line names the `@` glyph so a reader can tell which `x`-looking cell it
+    // refers to. Where the stretch is narrower than a column and no column samples inside it,
+    // no marker is drawn and the line must not name one: a footnote pointing at a glyph the
+    // row does not carry would be its own small dishonesty, and marking a neighbouring
+    // column would be worse, since that column's instant is known.
     if any_no_schedule {
+        let marker_drawn = out.contains(BAND_NO_SCHEDULE_GLYPH);
         let _ = writeln!(
             out,
-            "  {BAND_NO_SCHEDULE_GLYPH} no schedule is known for this stretch — a different claim from x (unknown state)"
+            "  {}",
+            if marker_drawn {
+                format!(
+                    "{BAND_NO_SCHEDULE_GLYPH} marks a stretch with no schedule known — a different claim from x (unknown state)"
+                )
+            } else {
+                "a stretch on the row above has no schedule known — narrower than one column here, so no cell marks it; a different claim from x (unknown state)".to_owned()
+            }
         );
     }
 
