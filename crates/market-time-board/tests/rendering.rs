@@ -1205,6 +1205,92 @@ fn dataset_text_cannot_forge_a_section_line() {
 }
 
 #[test]
+fn no_line_separator_a_dataset_can_carry_reaches_the_rendered_line() {
+    // `char::is_control` covers the Cc category and deliberately excludes U+2028 LINE
+    // SEPARATOR and U+2029 PARAGRAPH SEPARATOR, which are Zl and Zp. Many line-splitting
+    // implementations treat both as line breaks, so a dataset could forge a section line
+    // with either one even after the Cc characters were flattened. Every separator a JSON
+    // string can carry is driven through the real render path here.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-07-30T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "A", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-12-31T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-12-30"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/a", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    let interval = Interval::new(
+        instant("2026-11-27T12:00:00Z"),
+        instant("2026-11-27T13:00:00Z"),
+    )
+    .expect("valid interval");
+    let a = VenueId::new("A").expect("valid identifier");
+
+    for separator in [
+        '\n', '\r', '\t', '\u{000b}', '\u{000c}', '\u{2028}', '\u{2029}',
+    ] {
+        let definition = BandDefinition::new(
+            BandId::new(format!("id{separator}x")).expect("valid identifier"),
+            format!("Name{separator}Forged"),
+            vec![a.clone()],
+            DerivationNote::new(format!(
+                "prefix{separator}  @ no schedule is known for a stretch"
+            ))
+            .expect("non-empty"),
+        )
+        .expect("valid definition");
+
+        let timelines = vec![resolve_timeline(interval, &a, &ruleset)];
+        let band = derive_band(&definition, &timelines).expect("the timeline derives");
+
+        let mut board = view("UTC", "2026-11-27T12:00:00Z", "2026-11-27T13:00:00Z", None);
+        board.bands = BandSection {
+            bands: vec![band],
+            overlaps: Vec::new(),
+        };
+        let text = render(&board);
+
+        // Fully covered, so no `None` segment exists and no line may begin with the marker.
+        //
+        // The check cannot use `str::lines`, which splits only on `\n`/`\r\n` and would miss
+        // U+2028/U+2029; it splits on every separator a Unicode-aware reader would treat as a
+        // line break. For the Cc characters, which this renderer itself uses for real line
+        // breaks, what matters is that no *segment* the dataset could start begins with the
+        // marker — not their absence from the output, which would be wrong.
+        for segment in text.split(['\n', '\u{2028}', '\u{2029}']) {
+            assert!(
+                !segment.starts_with("  @ "),
+                "separator {separator:?} forged a section line: {segment:?}"
+            );
+        }
+        if !separator.is_ascii_whitespace() {
+            assert!(
+                !text.contains(separator),
+                "separator {separator:?} reached the rendered output unflattened: {text:?}"
+            );
+        }
+        // The dataset text is still shown, just flattened onto the line it belongs to.
+        assert!(
+            text.contains("prefix"),
+            "separator {separator:?} made the reasoning vanish: {text}"
+        );
+    }
+}
+
+#[test]
 fn a_no_schedule_stretch_shorter_than_one_column_still_reaches_the_footnote() {
     // A `None` stretch can be narrower than a single column of a wide window: the grid then
     // has no cell inside it and draws `x` over that stretch, exactly as it draws `x` for an

@@ -661,14 +661,18 @@ pub fn band_legend() -> String {
 /// readable and its length is preserved for the label column. A carriage return, tab, or
 /// other control character is flattened the same way, for the same reason: it could move the
 /// cursor or rewrite the line on a terminal.
+///
+/// [`char::is_control`] alone is not enough: it follows the Unicode `Cc` category and
+/// deliberately excludes `U+2028` LINE SEPARATOR and `U+2029` PARAGRAPH SEPARATOR, which are
+/// `Zl` and `Zp` and which many line-splitting implementations — including the one a
+/// reviewer used to expose this — treat as line breaks. Leaving them would let a dataset
+/// forge a section line with either character.
 fn one_line(text: &str) -> String {
     text.chars()
-        .map(|character| {
-            if character.is_control() {
-                ' '
-            } else {
-                character
-            }
+        .map(|character| match character {
+            '\u{2028}' | '\u{2029}' => ' ',
+            _ if character.is_control() => ' ',
+            _ => character,
         })
         .collect()
 }
