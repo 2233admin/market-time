@@ -920,6 +920,49 @@ fn every_surface_reporting_now_states_the_host_clock_discipline() {
 }
 
 #[test]
+fn an_error_that_names_the_resolved_instant_states_the_clock_too() {
+    // `cli.md` binds "output" that reports the resolved instant, and a refusal that quotes
+    // that instant is output just as a success message is. A previous version let `--hours`
+    // and the no-segment error print a host-clock reading with no statement about how well
+    // it was known — the same defect the success paths had already been fixed for.
+    let now = run(&[
+        "evidence",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-ALWAYS",
+        "--at",
+        "now",
+        "--hours",
+        "-24",
+    ]);
+    assert!(!now.status.success(), "a negative window is refused");
+    assert!(
+        stderr(&now).contains("discipline unmeasured"),
+        "the refusal names the resolved instant, so it must state the clock: {}",
+        stderr(&now)
+    );
+
+    let explicit = run(&[
+        "evidence",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-ALWAYS",
+        "--at",
+        "2026-11-27T14:00:00Z",
+        "--hours",
+        "-24",
+    ]);
+    assert!(!explicit.status.success(), "a negative window is refused");
+    assert!(
+        stderr(&explicit).contains("not read from a clock"),
+        "and an explicit instant must say no clock was consulted: {}",
+        stderr(&explicit)
+    );
+}
+
+#[test]
 fn venues_refuses_at_rather_than_accepting_and_ignoring_it() {
     // `venues` lists identifiers from the dataset and uses no instant. It used to accept
     // --at, exit 0, and print output byte-identical to the no-flag run — the flag was

@@ -711,8 +711,8 @@ fn overlap_segment_at(overlap: &BandOverlap, at: UtcInstant) -> Option<&OverlapS
 /// [`band_glyph`]'s own doc comment forbids reusing for a band row.
 pub const BAND_NO_SCHEDULE_GLYPH: char = '@';
 
-/// Whether any segment that the row's drawn `interval` actually overlaps has
-/// `uncertainty: None` — "no schedule known for this stretch."
+/// The first stretch that the row's drawn `interval` overlaps and whose `uncertainty` is
+/// `None` — "no schedule known for this stretch" — if there is one.
 ///
 /// Deliberately computed from the segments' own intervals, not from the sampled cells: the
 /// character grid samples one instant per column, so a `None` stretch narrower than a column
@@ -723,36 +723,36 @@ pub const BAND_NO_SCHEDULE_GLYPH: char = '@';
 /// Only segments overlapping the drawn window count. A `None` stretch entirely outside it is
 /// not on the page, and `board.md` forbids the footnote when nothing on the page carries the
 /// marker. Intervals are half-open (`start <= at < end`), so the test is a strict overlap.
-fn has_no_schedule_in<S>(
+///
+/// The interval is returned rather than a `bool` so the caller can place a marker for a
+/// stretch no column sampled.
+fn no_schedule_in<S>(
     segments: &[S],
     interval: Interval,
     segment_interval: impl Fn(&S) -> Interval,
     uncertainty_is_none: impl Fn(&S) -> bool,
-) -> bool {
+) -> Option<Interval> {
     segments
         .iter()
-        .filter(|segment| {
-            let segment = segment_interval(segment);
-            segment.start < interval.end && interval.start < segment.end
-        })
-        .any(uncertainty_is_none)
+        .map(|segment| (segment_interval(segment), segment))
+        .filter(|(stretch, _)| stretch.start < interval.end && interval.start < stretch.end)
+        .find(|(_, segment)| uncertainty_is_none(segment))
+        .map(|(stretch, _)| stretch)
 }
 
 /// Renders one derived band row, returning the row and whether any `None` stretch lies
 /// within the drawn interval.
 ///
-/// The returned flag and the cells are deliberately not derived the same way. A cell is only
-/// drawn for the single instant its column samples, so a `None` stretch shorter than one
-/// column can sit inside a wide window and leave no `@` anywhere on the row — the grid has
-/// no room to show five minutes within a 24-hour span, and it draws `x` there instead. The
-/// flag therefore comes from [`has_no_schedule_in`] over the segments themselves.
+/// The flag and the cells are not derived the same way, and the row is repaired so they
+/// agree. A cell is only drawn for the single instant its column samples, so a `None` stretch
+/// shorter than one column can sit inside a wide window and leave no `@` on the row at all —
+/// the grid has no room to show five minutes within a 24-hour span. The flag therefore comes
+/// from [`no_schedule_in`] over the segments themselves, and when the grid found no cell for
+/// the stretch [`place_missing_marker`] puts one there anyway.
 ///
-/// The consequence is deliberate and is what `board.md` asks for: the section footnote is
-/// the statement that survives, and it is printed whenever the row *contains* such a stretch
-/// regardless of whether the grid found room to mark it. The footnote names [`@`] because
-/// that is the marker when the grid can draw one; where it cannot, the sentence still tells
-/// the reader that some stretch on this row has no schedule known, which is the claim the
-/// contract requires not be dropped.
+/// That repair is what `board.md` asks for: the footnote is named for [`@`], and the contract
+/// requires the marker and the footnote together, so a row whose footnote names a glyph it
+/// does not carry would be the misleading pair the rule exists to prevent.
 ///
 /// [`@`]: BAND_NO_SCHEDULE_GLYPH
 fn render_band_row(
@@ -778,16 +778,57 @@ fn render_band_row(
 
     // Only the instant marker may take a cell; a `@` the grid fails to sample must not be
     // erased by it either, so the flag is computed from the segments rather than the cells.
-    let any_no_schedule = has_no_schedule_in(
+    let no_schedule = no_schedule_in(
         band.segments(),
         interval,
         |segment| segment.interval,
         |segment| segment.uncertainty.is_none(),
     );
     mark_now(&mut cells, interval, now, columns, span);
+    if let Some(stretch) = no_schedule {
+        place_missing_marker(&mut cells, stretch, interval, columns, span);
+    }
 
     let rendered: String = cells.into_iter().collect();
-    (format!("[{rendered}]"), any_no_schedule)
+    (format!("[{rendered}]"), no_schedule.is_some())
+}
+
+/// Puts a [`BAND_NO_SCHEDULE_GLYPH`] back on a row that should carry one but does not.
+///
+/// `board.md` asks for a marker on the affected row *and* a footnote, and it forbids the
+/// footnote when nothing on the page carries the marker. A `None` stretch narrower than one
+/// column is never sampled, so the cell loop draws no `@` for it and the footnote would name
+/// a glyph the row does not show. This marks the column nearest the stretch's start, which is
+/// the closest the grid can come to pointing at it.
+///
+/// The nearest column is used rather than freed only if it is occupied: the instant marker
+/// and an existing `@` are both more specific than this fallback, so they keep their cells.
+fn place_missing_marker(
+    cells: &mut [char],
+    stretch: Interval,
+    interval: Interval,
+    columns: usize,
+    span: i128,
+) {
+    if cells.is_empty() || cells.contains(&BAND_NO_SCHEDULE_GLYPH) {
+        return;
+    }
+    let offset = interval.start.saturating_nanos_until(stretch.start);
+    let column = usize::try_from(offset * as_i128(columns) / span).unwrap_or(0);
+    let column = column.min(cells.len() - 1);
+
+    // Prefer the stretch's own column; otherwise step outward looking for a cell the row is
+    // not already using, so a `|` or a state glyph is never destroyed to make room.
+    for distance in 0..cells.len() {
+        for candidate in [column.checked_sub(distance), column.checked_add(distance)] {
+            if let Some(index) = candidate.filter(|index| *index < cells.len())
+                && cells[index] == ' '
+            {
+                cells[index] = BAND_NO_SCHEDULE_GLYPH;
+                return;
+            }
+        }
+    }
 }
 
 fn render_overlap_row(
@@ -811,16 +852,19 @@ fn render_overlap_row(
         });
     }
 
-    let any_no_schedule = has_no_schedule_in(
+    let no_schedule = no_schedule_in(
         overlap.segments(),
         interval,
         |segment| segment.interval,
         |segment| segment.uncertainty.is_none(),
     );
     mark_now(&mut cells, interval, now, columns, span);
+    if let Some(stretch) = no_schedule {
+        place_missing_marker(&mut cells, stretch, interval, columns, span);
+    }
 
     let rendered: String = cells.into_iter().collect();
-    (format!("[{rendered}]"), any_no_schedule)
+    (format!("[{rendered}]"), no_schedule.is_some())
 }
 
 fn band_status(band: &SessionBand, now: Option<&NowMarker>) -> String {

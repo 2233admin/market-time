@@ -181,11 +181,15 @@ fn evidence_command(
     now: NowMarker,
 ) -> Result<String, String> {
     let venue = options.required_venue("evidence")?;
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let timeline = resolve_timeline(interval, &venue, ruleset);
 
-    let detail = market_time_board::inspect(&timeline, now.instant)
-        .ok_or_else(|| format!("no segment covers {} for {venue}", show(now.instant)))?;
+    let detail = market_time_board::inspect(&timeline, now.instant).ok_or_else(|| {
+        options.unusable_window(
+            &format!("no segment covers {} for {venue}", show(now.instant)),
+            &now,
+        )
+    })?;
 
     if options.format == Format::Json {
         return Ok(pretty(&detail_json(&detail, &now)));
@@ -427,7 +431,7 @@ fn board_command(
     options: &Options,
     now: NowMarker,
 ) -> Result<String, String> {
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let rows = ruleset
         .venues()
         .iter()
@@ -512,7 +516,7 @@ fn timeline_command(
     now: NowMarker,
 ) -> Result<String, String> {
     let venue = options.required_venue("a timeline")?;
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let timeline = resolve_timeline(interval, &venue, ruleset);
 
     if options.format == Format::Json {
@@ -589,7 +593,7 @@ fn bands_command(
     now: NowMarker,
 ) -> Result<String, String> {
     let selected = options.select_bands(definitions)?;
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let (bands, overlaps) = derive_all(&selected, ruleset, interval)?;
 
     // `select_bands` fails loudly when `--band` names an id this dataset does not declare
@@ -1050,16 +1054,28 @@ impl Options {
         }
     }
 
-    fn window(&self, now: UtcInstant) -> Result<Interval, String> {
+    /// The queried window, and the errors that refuse one.
+    ///
+    /// Takes the whole [`NowMarker`] rather than just its instant because `cli.md` binds any
+    /// output that reports the resolved instant, and a refusal that quotes `--hours` is still
+    /// a surface reporting the instant it was applied to. Carrying the discipline here rather
+    /// than at each call site means a command added later cannot forget it.
+    fn window(&self, now: &NowMarker) -> Result<Interval, String> {
         let span = i128::from(self.hours) * 3_600 * 1_000_000_000;
         if span == 0 {
-            return Err("--hours must not be zero".to_owned());
+            return Err(self.unusable_window("--hours must not be zero", now));
         }
+        let instant = now.instant;
         let (start, end) = if span > 0 {
-            (now, now.saturating_add_nanos(span))
+            (instant, instant.saturating_add_nanos(span))
         } else {
-            (now.saturating_add_nanos(span), now)
+            (instant.saturating_add_nanos(span), instant)
         };
-        Interval::new(start, end).map_err(|error| error.to_string())
+        Interval::new(start, end).map_err(|error| self.unusable_window(&error.to_string(), now))
+    }
+
+    /// A refused window, with the clock statement the command would otherwise have printed.
+    fn unusable_window(&self, reason: &str, now: &NowMarker) -> String {
+        format!("{reason}\n{}", now.discipline.describe())
     }
 }
