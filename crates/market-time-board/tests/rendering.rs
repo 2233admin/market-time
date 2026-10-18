@@ -841,6 +841,106 @@ fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() 
 }
 
 #[test]
+fn the_now_marker_does_not_erase_a_no_schedule_marker() {
+    // `board.md` requires a marker on the affected row *and* the section footnote that names
+    // it. The footnote prints whenever the row contains a `None` stretch, so if the instant
+    // marker could overwrite the only `@` the page would carry a footnote pointing at a
+    // glyph that is not there. The instant is stated elsewhere (`now:` under the board, and
+    // the band row's status column), so the marker yields.
+    //
+    // The shipped fixture cannot express this: its `None` regions are hours wide, so erasing
+    // one cell is invisible. This builds a dataset whose only `None` stretch is one column
+    // wide, with `now` on that same column, so the marker has exactly one `@` to destroy.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-01-01T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "V1", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:10Z", "end": "2026-01-02T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-01-01"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/v1", "fetched_at": "2026-01-01T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    // Coverage starts ten seconds after the window does, so the band's first segment is
+    // `None` over the window's opening seconds. `now` sits at the window start, which is the
+    // column that segment occupies — the collision this test exists for. It is deliberately
+    // the *first* column: with a `None` region many columns wide, erasing one cell would be
+    // invisible and the test would pass against the bug.
+    let interval = Interval::new(
+        instant("2026-01-01T00:00:00Z"),
+        instant("2026-01-02T00:00:00Z"),
+    )
+    .expect("valid interval");
+
+    let venue = VenueId::new("V1").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("b1").expect("valid identifier"),
+        "Only Band",
+        vec![venue.clone()],
+        DerivationNote::new("test fixture grouping").expect("non-empty"),
+    )
+    .expect("valid definition");
+
+    let timelines = vec![resolve_timeline(interval, &venue, &ruleset)];
+    let band = derive_band(&definition, &timelines).expect("the timeline derives");
+    assert!(
+        band.segments()
+            .iter()
+            .any(|segment| segment.uncertainty.is_none()),
+        "the derived band must carry a `None` segment for this test to mean anything"
+    );
+
+    let mut board = view("UTC", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", None);
+    board.columns = 72;
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+
+    // With no `now`, the row shows the absence marker.
+    let without_now = render(&board);
+    assert!(
+        without_now.contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "the row carries the marker when no instant is drawn on it: {without_now}"
+    );
+
+    // Put the instant marker on the first column, the same one the `None` stretch occupies.
+    board.now = Some(NowMarker {
+        instant: interval.start,
+        discipline: ClockDiscipline::Given {
+            source: "test".to_owned(),
+        },
+    });
+    let with_now = render(&board);
+    // The instant marker would take the first column, which is the only column the `None`
+    // stretch occupies. If it won, the row would open with `|` and carry no marker at all
+    // while the footnote still named one — the misleading pair this guards against.
+    let band_row = with_now
+        .lines()
+        .find(|line| line.starts_with("b1:"))
+        .expect("the band row is drawn");
+    assert!(
+        band_row.contains("[@"),
+        "the instant marker must not erase the only absence marker on the row: {band_row}"
+    );
+    assert!(
+        with_now.contains("no schedule is known for this stretch"),
+        "and the footnote naming it must agree with the row: {with_now}"
+    );
+}
+
+#[test]
 fn a_no_schedule_stretch_shorter_than_one_column_still_reaches_the_footnote() {
     // A `None` stretch can be narrower than a single column of a wide window: the grid then
     // has no cell inside it and draws `x` over that stretch, exactly as it draws `x` for an

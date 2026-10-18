@@ -551,6 +551,14 @@ fn render_row(
 /// Shared by the venue, band, and overlap row renderers so the marker's column arithmetic
 /// cannot drift between them — a viewer reading straight down a column across all three
 /// sections must see the same instant, not three approximations of it.
+///
+/// A cell already carrying [`BAND_NO_SCHEDULE_GLYPH`] is left alone. `board.md` requires a
+/// marker on the affected row *as well as* the section footnote that names it, and the
+/// footnote is printed whenever the row contains such a stretch; letting the instant marker
+/// overwrite the only `@` would leave the footnote pointing at a glyph that is not on the
+/// page. The instant is still legible there — it is named in the `now:` line under the board
+/// and, on the band rows, by the status column — whereas the no-schedule marker has no other
+/// place to appear.
 fn mark_now(
     cells: &mut [char],
     interval: Interval,
@@ -563,7 +571,9 @@ fn mark_now(
     {
         let offset = interval.start.saturating_nanos_until(now.instant);
         let column = usize::try_from(offset * as_i128(columns) / span).unwrap_or(0);
-        if let Some(cell) = cells.get_mut(column) {
+        if let Some(cell) = cells.get_mut(column)
+            && *cell != BAND_NO_SCHEDULE_GLYPH
+        {
             *cell = '|';
         }
     }
