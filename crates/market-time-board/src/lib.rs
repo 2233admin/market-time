@@ -701,14 +701,50 @@ fn overlap_segment_at(overlap: &BandOverlap, at: UtcInstant) -> Option<&OverlapS
 /// [`band_glyph`]'s own doc comment forbids reusing for a band row.
 pub const BAND_NO_SCHEDULE_GLYPH: char = '@';
 
-/// Renders one derived band row, returning the row and whether any drawn cell carried
-/// [`BAND_NO_SCHEDULE_GLYPH`].
+/// Whether any segment that the row's drawn `interval` actually overlaps has
+/// `uncertainty: None` — "no schedule known for this stretch."
 ///
-/// The flag is computed from the cells actually drawn, not from a separate scan of the
-/// band's segments. `board.md` forbids the section footnote when no segment's uncertainty
-/// is `None`, and a scan over all segments would print it for a `None` stretch that falls
-/// entirely outside the drawn interval — a line naming nothing on the page. Deriving the
-/// flag from the cells keeps the footnote and the marker describing the same thing.
+/// Deliberately computed from the segments' own intervals, not from the sampled cells: the
+/// character grid samples one instant per column, so a `None` stretch narrower than a column
+/// falls between two samples. That would leave the footnote either asserting a marker that
+/// is not on the row or omitting one for a stretch that is. The SVG renderer draws every
+/// segment as a rect spanning its own interval for the same reason.
+///
+/// Only segments overlapping the drawn window count. A `None` stretch entirely outside it is
+/// not on the page, and `board.md` forbids the footnote when nothing on the page carries the
+/// marker. Intervals are half-open (`start <= at < end`), so the test is a strict overlap.
+fn has_no_schedule_in<S>(
+    segments: &[S],
+    interval: Interval,
+    segment_interval: impl Fn(&S) -> Interval,
+    uncertainty_is_none: impl Fn(&S) -> bool,
+) -> bool {
+    segments
+        .iter()
+        .filter(|segment| {
+            let segment = segment_interval(segment);
+            segment.start < interval.end && interval.start < segment.end
+        })
+        .any(uncertainty_is_none)
+}
+
+/// Renders one derived band row, returning the row and whether any `None` stretch lies
+/// within the drawn interval.
+///
+/// The returned flag and the cells are deliberately not derived the same way. A cell is only
+/// drawn for the single instant its column samples, so a `None` stretch shorter than one
+/// column can sit inside a wide window and leave no `@` anywhere on the row — the grid has
+/// no room to show five minutes within a 24-hour span, and it draws `x` there instead. The
+/// flag therefore comes from [`has_no_schedule_in`] over the segments themselves.
+///
+/// The consequence is deliberate and is what `board.md` asks for: the section footnote is
+/// the statement that survives, and it is printed whenever the row *contains* such a stretch
+/// regardless of whether the grid found room to mark it. The footnote names [`@`] because
+/// that is the marker when the grid can draw one; where it cannot, the sentence still tells
+/// the reader that some stretch on this row has no schedule known, which is the claim the
+/// contract requires not be dropped.
+///
+/// [`@`]: BAND_NO_SCHEDULE_GLYPH
 fn render_band_row(
     band: &SessionBand,
     interval: Interval,
@@ -717,14 +753,12 @@ fn render_band_row(
 ) -> (String, bool) {
     let span = interval.start.saturating_nanos_until(interval.end).max(1);
     let mut cells = vec![' '; columns];
-    let mut any_no_schedule = false;
 
     for (column, cell) in cells.iter_mut().enumerate() {
         let offset = span * as_i128(column) / as_i128(columns);
         let at = interval.start.saturating_add_nanos(offset);
         *cell = band_segment_at(band, at).map_or(' ', |segment| {
             if segment.uncertainty.is_none() {
-                any_no_schedule = true;
                 BAND_NO_SCHEDULE_GLYPH
             } else {
                 band_glyph(segment.state)
@@ -732,6 +766,14 @@ fn render_band_row(
         });
     }
 
+    // Only the instant marker may take a cell; a `@` the grid fails to sample must not be
+    // erased by it either, so the flag is computed from the segments rather than the cells.
+    let any_no_schedule = has_no_schedule_in(
+        band.segments(),
+        interval,
+        |segment| segment.interval,
+        |segment| segment.uncertainty.is_none(),
+    );
     mark_now(&mut cells, interval, now, columns, span);
 
     let rendered: String = cells.into_iter().collect();
@@ -746,14 +788,12 @@ fn render_overlap_row(
 ) -> (String, bool) {
     let span = interval.start.saturating_nanos_until(interval.end).max(1);
     let mut cells = vec![' '; columns];
-    let mut any_no_schedule = false;
 
     for (column, cell) in cells.iter_mut().enumerate() {
         let offset = span * as_i128(column) / as_i128(columns);
         let at = interval.start.saturating_add_nanos(offset);
         *cell = overlap_segment_at(overlap, at).map_or(' ', |segment| {
             if segment.uncertainty.is_none() {
-                any_no_schedule = true;
                 BAND_NO_SCHEDULE_GLYPH
             } else {
                 overlap_glyph(segment.state)
@@ -761,6 +801,12 @@ fn render_overlap_row(
         });
     }
 
+    let any_no_schedule = has_no_schedule_in(
+        overlap.segments(),
+        interval,
+        |segment| segment.interval,
+        |segment| segment.uncertainty.is_none(),
+    );
     mark_now(&mut cells, interval, now, columns, span);
 
     let rendered: String = cells.into_iter().collect();

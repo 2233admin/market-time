@@ -839,3 +839,63 @@ fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() 
         "and must not print the line when it names nothing on the page: {known_text}"
     );
 }
+
+#[test]
+fn a_no_schedule_stretch_shorter_than_one_column_still_reaches_the_footnote() {
+    // A `None` stretch can be narrower than a single column of a wide window: the grid then
+    // has no cell inside it and draws `x` over that stretch, exactly as it draws `x` for an
+    // ordinary unknown. An earlier version decided the footnote by looking at what the cells
+    // sampled, so the statement vanished for precisely these stretches — the widest windows,
+    // where a reader is least able to check by eye.
+    //
+    // The section is built with ONE band and no overlap on purpose. With two bands the
+    // fixture's overlap row also carries the marker, so its footnote prints either way and
+    // the test would pass against the buggy version too — it must isolate the band row for
+    // this assertion to mean anything.
+    let ruleset = ruleset();
+    let interval = Interval::new(
+        instant("2026-12-30T16:05:00Z"),
+        instant("2026-12-31T16:05:00Z"),
+    )
+    .expect("valid interval");
+
+    let auct = VenueId::new("SYNTH-AUCT").expect("valid identifier");
+    let dst = VenueId::new("SYNTH-DST").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("band-test-regional").expect("valid identifier"),
+        "Test Regional",
+        vec![auct.clone(), dst.clone()],
+        DerivationNote::new("test fixture grouping, not any real desk's").expect("non-empty"),
+    )
+    .expect("valid definition");
+
+    // The fixture's regional band ends with a five-minute `None` stretch at
+    // 2026-12-31T16:00Z. This window ends at 16:05Z, so that stretch is inside it.
+    let timelines = vec![
+        resolve_timeline(interval, &auct, &ruleset),
+        resolve_timeline(interval, &dst, &ruleset),
+    ];
+    let band = derive_band(&definition, &timelines).expect("the fixture's timelines derive");
+    assert!(
+        band.segments()
+            .iter()
+            .any(|segment| segment.uncertainty.is_none()),
+        "the fixture must still produce a `None` stretch for this test to mean anything"
+    );
+
+    let mut board = view("UTC", "2026-12-30T16:05:00Z", "2026-12-31T16:05:00Z", None);
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+
+    let text = render(&board);
+    let heading_at = text
+        .find("DERIVED BANDS")
+        .expect("the band section is drawn");
+    assert!(
+        text[heading_at..].contains("no schedule is known for this stretch"),
+        "a `None` stretch inside the window must be stated even when no column samples it: \
+         {text}"
+    );
+}
