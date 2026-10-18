@@ -793,16 +793,17 @@ fn render_band_row(
     (format!("[{rendered}]"), no_schedule.is_some())
 }
 
-/// Puts a [`BAND_NO_SCHEDULE_GLYPH`] back on a row that should carry one but does not.
+/// Puts a [`BAND_NO_SCHEDULE_GLYPH`] on a row that should carry one but does not.
 ///
 /// `board.md` asks for a marker on the affected row *and* a footnote, and it forbids the
 /// footnote when nothing on the page carries the marker. A `None` stretch narrower than one
-/// column is never sampled, so the cell loop draws no `@` for it and the footnote would name
-/// a glyph the row does not show. This marks the column nearest the stretch's start, which is
-/// the closest the grid can come to pointing at it.
+/// column is never sampled, so the cell loop draws a state glyph for the column it falls in
+/// and no `@` anywhere, and the footnote would name a glyph the row does not show.
 ///
-/// The nearest column is used rather than freed only if it is occupied: the instant marker
-/// and an existing `@` are both more specific than this fallback, so they keep their cells.
+/// The stretch's own column is marked, replacing whatever state glyph the cell loop drew
+/// there: that column *is* inside the stretch — the grid simply could not show how narrow it
+/// is — so `@` is the accurate glyph for it, not an approximation. The instant marker is the
+/// one cell never taken, because it carries a different claim and `mark_now` runs first.
 fn place_missing_marker(
     cells: &mut [char],
     stretch: Interval,
@@ -817,12 +818,13 @@ fn place_missing_marker(
     let column = usize::try_from(offset * as_i128(columns) / span).unwrap_or(0);
     let column = column.min(cells.len() - 1);
 
-    // Prefer the stretch's own column; otherwise step outward looking for a cell the row is
-    // not already using, so a `|` or a state glyph is never destroyed to make room.
+    // Walk outward so that if the stretch's own column happens to hold the instant marker,
+    // the nearest cell inside the stretch still carries the marker rather than the row
+    // losing it. Only `|` is never overwritten.
     for distance in 0..cells.len() {
         for candidate in [column.checked_sub(distance), column.checked_add(distance)] {
             if let Some(index) = candidate.filter(|index| *index < cells.len())
-                && cells[index] == ' '
+                && cells[index] != '|'
             {
                 cells[index] = BAND_NO_SCHEDULE_GLYPH;
                 return;
