@@ -648,20 +648,45 @@ pub fn band_legend() -> String {
         .to_owned()
 }
 
+/// Collapses dataset-supplied text to one line, so it cannot render as renderer output.
+///
+/// Band ids, display names and derivation notes come from the dataset file. Written verbatim
+/// they can contain a newline, and a newline starts a reflected line that is indistinguishable
+/// from a line this renderer wrote — a derivation note beginning `\n  @ no schedule…` would
+/// forge a section footnote for a render that has no `None` uncertainty at all, which
+/// `board.md` lines 147-149 forbid outright and which would let dataset text make the board
+/// state something untrue about the data.
+///
+/// Control characters are replaced with a space rather than dropped so the text stays
+/// readable and its length is preserved for the label column. A carriage return, tab, or
+/// other control character is flattened the same way, for the same reason: it could move the
+/// cursor or rewrite the line on a terminal.
+fn one_line(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
 /// The label a band's row is printed under: its id and display name together, so an
 /// abbreviated id never stands alone without the human-readable name next to it.
 pub(crate) fn band_label(band: &SessionBand) -> String {
     format!(
         "{}: {}",
-        band.definition().id(),
-        band.definition().display_name()
+        one_line(band.definition().id().as_str()),
+        one_line(band.definition().display_name())
     )
 }
 
 /// The label an overlap's row is printed under: the two band ids it was computed from.
 pub(crate) fn overlap_label(overlap: &BandOverlap) -> String {
     let [left, right] = overlap.bands();
-    format!("{left} x {right}")
+    format!("{} x {}", one_line(left.as_str()), one_line(right.as_str()))
 }
 
 /// Turns a stable identifier — [`BandState::as_str`] or [`OverlapState::as_str`]'s
@@ -977,7 +1002,7 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
         let _ = writeln!(
             out,
             "  derived  {}",
-            band.definition().derivation().reasoning()
+            one_line(band.definition().derivation().reasoning())
         );
     }
 
@@ -1002,7 +1027,11 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
                 row_marker,
                 label_width = label_width,
             );
-            let _ = writeln!(out, "  derived  {}", overlap.derivation().reasoning());
+            let _ = writeln!(
+                out,
+                "  derived  {}",
+                one_line(overlap.derivation().reasoning())
+            );
         }
     }
 

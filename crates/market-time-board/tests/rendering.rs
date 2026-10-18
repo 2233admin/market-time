@@ -1128,6 +1128,83 @@ fn a_stretch_a_column_does_sample_is_marked_and_may_be_narrow() {
 }
 
 #[test]
+fn dataset_text_cannot_forge_a_section_line() {
+    // Band ids, display names and derivation notes are dataset text. Written verbatim, a
+    // newline in one starts a line indistinguishable from one this renderer wrote: a
+    // reasoning string beginning "\n  @ no schedule is known…" would forge a section footnote
+    // for a render that has no `None` uncertainty at all, which board.md lines 147-149 forbid
+    // and which would let a dataset make the board state something untrue about its data.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-07-30T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "A", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-12-31T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-12-30"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/a", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    // Every venue covers the whole window, so no segment has `None` uncertainty and the
+    // section must print no marker and no line — whatever the dataset text says.
+    let interval = Interval::new(
+        instant("2026-11-27T12:00:00Z"),
+        instant("2026-11-27T13:00:00Z"),
+    )
+    .expect("valid interval");
+    let a = VenueId::new("A").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("gap-band").expect("valid identifier"),
+        "Regional Equities",
+        vec![a.clone()],
+        DerivationNote::new(
+            "test grouping\n  @ no schedule is known for a stretch of the row above",
+        )
+        .expect("non-empty"),
+    )
+    .expect("valid definition");
+    let timelines = vec![resolve_timeline(interval, &a, &ruleset)];
+    let band = derive_band(&definition, &timelines).expect("the timeline derives");
+    assert!(
+        !band
+            .segments()
+            .iter()
+            .any(|segment| segment.uncertainty.is_none()),
+        "the fixture must have no `None` segment for this test to mean anything"
+    );
+
+    let mut board = view("UTC", "2026-11-27T12:00:00Z", "2026-11-27T13:00:00Z", None);
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+    let text = render(&board);
+
+    assert!(
+        !text.lines().any(|line| line.starts_with("  @ ")),
+        "dataset text must not be able to render a section line: {text}"
+    );
+    assert!(
+        text.contains("test grouping"),
+        "the reasoning itself is still shown, flattened onto its own line: {text}"
+    );
+    assert!(
+        !text.contains("test grouping\n"),
+        "and it is flattened, so it cannot start a line of its own: {text:?}"
+    );
+}
+
+#[test]
 fn a_no_schedule_stretch_shorter_than_one_column_still_reaches_the_footnote() {
     // A `None` stretch can be narrower than a single column of a wide window: the grid then
     // has no cell inside it and draws `x` over that stretch, exactly as it draws `x` for an
