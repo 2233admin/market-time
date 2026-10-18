@@ -955,12 +955,23 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
         let (row, row_has_no_schedule) =
             render_band_row(band, view.interval, columns, view.now.as_ref());
         any_no_schedule |= row_has_no_schedule;
+        // Where no column samples inside the stretch the grid cannot point at it in the
+        // track, so the marker goes beside the status instead — `board.md` asks for a marker
+        // on the affected row, not specifically inside the track, and this marks the row
+        // without claiming any particular instant. Marks a different glyph from the track's
+        // so a reader cannot read it as a time column.
+        let row_marker = if row_has_no_schedule && !row.contains(BAND_NO_SCHEDULE_GLYPH) {
+            format!(" {BAND_NO_SCHEDULE_GLYPH}")
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             out,
-            "{:label_width$}  {}  {} (derived)",
+            "{:label_width$}  {}  {} (derived){}",
             band_label(band),
             row,
             band_status(band, view.now.as_ref()),
+            row_marker,
             label_width = label_width,
         );
         let _ = writeln!(
@@ -977,12 +988,18 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
             let (row, row_has_no_schedule) =
                 render_overlap_row(overlap, view.interval, columns, view.now.as_ref());
             any_no_schedule |= row_has_no_schedule;
+            let row_marker = if row_has_no_schedule && !row.contains(BAND_NO_SCHEDULE_GLYPH) {
+                format!(" {BAND_NO_SCHEDULE_GLYPH}")
+            } else {
+                String::new()
+            };
             let _ = writeln!(
                 out,
-                "{:label_width$}  {}  {} (derived)",
+                "{:label_width$}  {}  {} (derived){}",
                 overlap_label(overlap),
                 row,
                 overlap_status(overlap, view.now.as_ref()),
+                row_marker,
                 label_width = label_width,
             );
             let _ = writeln!(out, "  derived  {}", overlap.derivation().reasoning());
@@ -995,24 +1012,14 @@ fn render_band_section(view: &BoardView, columns: usize, venue_label_width: usiz
     // *not* be printed when no drawn segment's uncertainty is `None` — so this is conditional
     // on such a stretch being on the page, never on layout.
     //
-    // The wording depends on whether the grid could actually point at the stretch. Where it
-    // could, the line names the `@` glyph so a reader can tell which `x`-looking cell it
-    // refers to. Where the stretch is narrower than a column and no column samples inside it,
-    // no marker is drawn and the line must not name one: a footnote pointing at a glyph the
-    // row does not carry would be its own small dishonesty, and marking a neighbouring
-    // column would be worse, since that column's instant is known.
+    // `marker_drawn` is accumulated from the row tracks themselves, never from this buffer:
+    // a band display name is dataset text and may contain almost anything, so scanning the
+    // rendered section for the glyph would let a name make the line claim a marker the row
+    // does not carry.
     if any_no_schedule {
-        let marker_drawn = out.contains(BAND_NO_SCHEDULE_GLYPH);
         let _ = writeln!(
             out,
-            "  {}",
-            if marker_drawn {
-                format!(
-                    "{BAND_NO_SCHEDULE_GLYPH} marks a stretch with no schedule known — a different claim from x (unknown state)"
-                )
-            } else {
-                "a stretch on the row above has no schedule known — narrower than one column here, so no cell marks it; a different claim from x (unknown state)".to_owned()
-            }
+            "  {BAND_NO_SCHEDULE_GLYPH} no schedule is known for a stretch of the row above — a different claim from x (unknown state)"
         );
     }
 

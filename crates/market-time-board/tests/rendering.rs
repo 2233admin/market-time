@@ -809,13 +809,11 @@ fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() 
         "and the section must state that absence in its own key, in the default view rather \
          than only on hover: {text}"
     );
-    // The footnote names the marker when the grid could draw one, or says plainly that it
-    // could not; either way it must not point at a glyph the row does not carry.
+    // A marker on the row is required, in the track where a column samples inside the stretch
+    // and beside the status where none does; either way the section line names it.
     assert!(
-        text[heading_at..].contains("marks a stretch with no schedule known")
-            || text[heading_at..].contains("no cell marks it"),
-        "the section's line must say which cell it means, or that the grid could not point \
-         at the stretch: {text}"
+        text[heading_at..].contains("no schedule is known for a stretch"),
+        "the section's line must state the absence and name the marker: {text}"
     );
 
     // A fully in-coverage day has nothing to mark, so neither the marker nor the line may
@@ -937,13 +935,13 @@ fn the_now_marker_does_not_erase_a_no_schedule_marker() {
         "the instant marker must not erase the only absence marker on the row: {band_row}"
     );
     assert!(
-        with_now.contains("marks a stretch with no schedule known"),
+        with_now.contains("no schedule is known for a stretch"),
         "and the footnote naming it must agree with the row: {with_now}"
     );
 }
 
 #[test]
-fn an_unsampled_none_stretch_is_stated_without_claiming_a_marker() {
+fn an_unsampled_none_stretch_marks_the_row_not_a_wrong_column() {
     // A `None` stretch narrower than one column: the cell loop draws the state glyph for the
     // column it falls in — `x`, indistinguishable from an ordinary unknown — so the row would
     // carry no `@` at all while the footnote named one. `board.md` requires both. The marker
@@ -1025,29 +1023,25 @@ fn an_unsampled_none_stretch_is_stated_without_claiming_a_marker() {
         .find(|line| line.starts_with("band-gap:"))
         .expect("the band row is drawn");
 
-    // The row is 48 columns of `x` and the gap is far narrower than one of them. No column
-    // samples inside the stretch, so no cell can truthfully be marked: the column the
-    // stretch begins in samples 12:00, which the data reports as known, and marking it would
-    // put "no schedule is known here" on a stretch that is exact — the one error this
-    // product exists to prevent, and worse than the missing marker it would replace.
+    // The row is 48 columns of `x` and the gap is far narrower than one of them, so no column
+    // samples inside the stretch and the track cannot point at it: the column the stretch
+    // begins in samples 12:00, which the data reports as known, and marking that would put
+    // "no schedule is known here" on a stretch that is exact — the one error this product
+    // exists to prevent. The grid therefore marks the *row*, beside the status, which is what
+    // `board.md` asks for: a marker on the affected row, not necessarily inside the track.
     assert!(
-        !row.contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
-        "no column samples inside the stretch, so none may be marked: {row}"
+        !row.contains("[x@") && !row.contains("@x"),
+        "no column samples inside the stretch, so the track must not be marked: {row}"
+    );
+    assert!(
+        row.ends_with(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "but the row itself must carry a marker, as the contract requires: {row}"
     );
 
-    // The statement itself must survive that, and must not pretend a marker exists.
+    // The statement names that marker; it never points at one the row does not carry.
     assert!(
-        text.contains("no schedule"),
-        "the stretch must still be stated when the grid cannot point at it: {text}"
-    );
-    assert!(
-        text.contains("no cell marks it"),
-        "and the line must say the grid could not point at it rather than naming a glyph \
-         that is not on the row: {text}"
-    );
-    assert!(
-        !text.contains("marks a stretch with no schedule known"),
-        "the line must not name a marker the row does not carry: {text}"
+        text.contains("no schedule is known for a stretch"),
+        "the stretch must be stated: {text}"
     );
 }
 
@@ -1128,7 +1122,7 @@ fn a_stretch_a_column_does_sample_is_marked_and_may_be_narrow() {
         "a column samples inside the stretch, so exactly one cell is marked: {row}"
     );
     assert!(
-        text.contains("marks a stretch with no schedule known"),
+        text.contains("no schedule is known for a stretch"),
         "and the line names that marker: {text}"
     );
 }
