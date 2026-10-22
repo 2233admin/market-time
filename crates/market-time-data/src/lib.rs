@@ -30,5 +30,7 @@ pub mod load;
 pub mod revision;
 
 pub use fetch::{FetchError, FetchedDocument, FileFetcher, SourceFetcher, SourceRegistration};
-pub use load::{LoadError, load_ruleset, parse_ruleset};
+pub use load::{
+    LoadError, LoadedDataset, load_dataset, load_ruleset, parse_dataset, parse_ruleset,
+};
 pub use revision::{AssemblyError, RevisionAssembly, evidence_from};

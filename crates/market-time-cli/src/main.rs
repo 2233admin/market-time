@@ -8,15 +8,22 @@
 //! Domain and Data Constraints. Wide-area internet time synchronisation does not reach
 //! nanoseconds, and no surface here may imply that it does.
 
-use market_time_board::{BoardRow, BoardView, ClockDiscipline, NowMarker, SegmentDetail};
+use market_time_board::{
+    BandSection, BoardRow, BoardView, ClockDiscipline, DatasetRevisionFooter, HtmlOptions,
+    NowMarker, SegmentDetail,
+};
 use market_time_core::TimelineSegment;
 use market_time_core::VenueId;
+use market_time_core::{
+    BandDefinition, BandId, BandOverlap, BandSegment, OverlapSegment, SessionBand, derive_band,
+    derive_overlap,
+};
 use market_time_core::{
     CivilInstant, CivilResolution, IanaZoneId, Phase, PhaseOutcome, Ruleset, resolve_phase,
     resolve_timeline,
 };
 use market_time_core::{Interval, UtcInstant};
-use market_time_data::load_ruleset;
+use market_time_data::load_dataset;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -28,8 +35,9 @@ market-time — what phase is a venue in, and how well is that known?
 USAGE
   market-time phase    --dataset <path> [--venue <id>] [--at <rfc3339|now>] [--format text|json]
   market-time evidence --dataset <path>  --venue <id> [--at <rfc3339|now>] [--format text|json]
-  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg]
+  market-time board    --dataset <path> [--at <rfc3339|now>] [--zone <IANA>] [--hours <n>] [--format text|svg|html] [--no-bands]
   market-time timeline --dataset <path>  --venue <id> [--at <rfc3339|now>] [--hours <n>] [--format text|json]
+  market-time bands    --dataset <path> [--band <id>]... [--at <rfc3339|now>] [--hours <n>] [--format text|json]
   market-time venues   --dataset <path>
 
 NOTES
@@ -48,8 +56,32 @@ NOTES
   open it. Colour is never the only channel there either — every row is labelled, and an
   out-of-coverage stretch is hatched rather than merely paler.
 
+  --format html on `board` writes one self-contained, interactive HTML page to stdout —
+  inline CSS and JS, no external request of any kind, so it works with no network and never
+  leaks which venues an operator watches. The picture is the same SVG `--format svg` draws,
+  embedded verbatim; hovering or focusing a segment shows its evidence (from the same
+  answer `evidence` prints, not recomputed in the browser), a zone selector relabels the
+  axis and every segment's stretch using label sets this shell precomputes per zone in
+  Rust, and a live clock line advances on the browser's own clock — permanently captioned
+  \"browser clock — discipline unmeasured\" — except when --at supplied a fixed instant,
+  in which case that instant is shown as stated and nothing ticks. The footer names the
+  dataset revision(s) and the pinned IANA tzdb version the page was rendered from.
+
+  `board` also derives every session band the dataset declares (over the same window as
+  its venue rows) and every pairwise overlap between them, and draws both beneath the
+  venue rows — labelled DERIVED throughout, in a glyph vocabulary that is never the phase
+  vocabulary, because a band is not a phase (see `bands` below). --no-bands suppresses that
+  section entirely; a dataset with no bands declared renders with no section either way, not
+  an empty one.
+
   --format json is the shape for machines. Uncertainty and unknown are fields there, not
   prose: an unknown answer has \"phase\": null and a stated reason, never \"closed\".
+
+  `bands` derives the dataset's session bands (never a published fact — see
+  BandDefinition's derivation note) over the same --at/--hours window as `timeline`.
+  --band <id> may repeat; omitted, every band in the dataset is derived. With two or more
+  selected bands, every unordered pair is also reported as a computed overlap: an unknown
+  band always wins over \"not overlapping\", it never proves an overlap's absence.
 ";
 
 fn main() -> ExitCode {
@@ -76,18 +108,20 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 
     let options = Options::parse(&args[1..])?;
-    let dataset = options
+    let dataset_path = options
         .dataset
         .clone()
         .ok_or_else(|| "--dataset <path> is required".to_owned())?;
-    let ruleset = load_ruleset(&dataset).map_err(|error| error.to_string())?;
+    let dataset = load_dataset(&dataset_path).map_err(|error| error.to_string())?;
+    let ruleset = &dataset.ruleset;
     let now = options.resolve_now()?;
 
     match command {
-        "phase" => phase_command(&ruleset, &options, now),
-        "evidence" => evidence_command(&ruleset, &options, now),
-        "board" => board_command(&ruleset, &options, now),
-        "timeline" => timeline_command(&ruleset, &options, now),
+        "phase" => phase_command(ruleset, &options, now),
+        "evidence" => evidence_command(ruleset, &options, now),
+        "board" => board_command(ruleset, &dataset.bands, &options, now),
+        "timeline" => timeline_command(ruleset, &options, now),
+        "bands" => bands_command(ruleset, &dataset.bands, &options, now),
         "venues" => Ok(ruleset
             .venues()
             .iter()
@@ -329,7 +363,48 @@ fn render_outcome(venue: &VenueId, outcome: &PhaseOutcome) -> String {
     }
 }
 
-fn board_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result<String, String> {
+/// Derives every band in `definitions` over `interval`, plus every unordered pairwise
+/// overlap between them.
+///
+/// Shared by `board` (which always wants every band the dataset declares) and `bands`
+/// (which wants only the ones `--band` selected, or `select_bands`'s reading of "none
+/// named means every one"): the derive-then-overlap step itself does not differ between
+/// the two commands, only which definitions it is handed.
+///
+/// # Errors
+///
+/// Returns whatever [`derive_band`] or [`derive_overlap`] rejected, as a message.
+fn derive_all(
+    definitions: &[BandDefinition],
+    ruleset: &Ruleset,
+    interval: Interval,
+) -> Result<(Vec<SessionBand>, Vec<BandOverlap>), String> {
+    let mut bands: Vec<SessionBand> = Vec::with_capacity(definitions.len());
+    for definition in definitions {
+        let timelines: Vec<_> = definition
+            .members()
+            .iter()
+            .map(|venue| resolve_timeline(interval, venue, ruleset))
+            .collect();
+        bands.push(derive_band(definition, &timelines).map_err(|error| error.to_string())?);
+    }
+
+    let mut overlaps: Vec<BandOverlap> = Vec::new();
+    for (index, left) in bands.iter().enumerate() {
+        for right in &bands[index + 1..] {
+            overlaps.push(derive_overlap(left, right).map_err(|error| error.to_string())?);
+        }
+    }
+
+    Ok((bands, overlaps))
+}
+
+fn board_command(
+    ruleset: &Ruleset,
+    band_definitions: &[BandDefinition],
+    options: &Options,
+    now: NowMarker,
+) -> Result<String, String> {
     let interval = options.window(now.instant)?;
     let rows = ruleset
         .venues()
@@ -342,19 +417,71 @@ fn board_command(ruleset: &Ruleset, options: &Options, now: NowMarker) -> Result
         })
         .collect();
 
+    // `--no-bands` suppresses the section outright: with no bands and no overlaps handed
+    // to `BoardView`, `market_time_board::BandSection::is_empty` is true and the renderers
+    // draw nothing for it — no empty heading, no placeholder line.
+    let bands = if options.no_bands {
+        BandSection::default()
+    } else {
+        let (bands, overlaps) = derive_all(band_definitions, ruleset, interval)?;
+        BandSection { bands, overlaps }
+    };
+
     let view = BoardView {
         interval,
         rows,
         now: Some(now),
         axis_zone: options.zone.clone(),
         columns: options.columns,
+        bands,
     };
 
-    if options.format == Format::Svg {
-        return Ok(market_time_board::render_svg(&view));
+    match options.format {
+        Format::Svg => Ok(market_time_board::render_svg(&view)),
+        Format::Html => {
+            let html_options = HtmlOptions {
+                zones: board_zones(ruleset, &options.zone),
+                dataset_revisions: dataset_revisions_footer(ruleset),
+                ..HtmlOptions::default()
+            };
+            Ok(market_time_board::render_html(&view, &html_options))
+        }
+        Format::Text | Format::Json => Ok(market_time_board::render(&view)),
     }
+}
 
-    Ok(market_time_board::render(&view))
+/// The zones `--format html`'s selector offers: every venue's home zone, deduplicated, in
+/// the order the dataset lists them, plus `--zone`'s own axis zone (so the page's default
+/// zone is always one of its own choices). `render_html` additionally guarantees `"UTC"` is
+/// present even if this list omits it, so that fallback is not repeated here.
+fn board_zones(ruleset: &Ruleset, axis_zone: &str) -> Vec<String> {
+    let mut zones: Vec<String> = Vec::new();
+    for venue in ruleset.venues() {
+        if let Some(venue_rules) = ruleset.venue(&venue) {
+            let zone = venue_rules.home_zone.as_str().to_owned();
+            if !zones.contains(&zone) {
+                zones.push(zone);
+            }
+        }
+    }
+    if !zones.contains(&axis_zone.to_owned()) {
+        zones.push(axis_zone.to_owned());
+    }
+    zones
+}
+
+/// The dataset revisions named in `--format html`'s footer, read straight off the
+/// `Ruleset` the CLI already loaded — `market_time_board` has no access to a `Ruleset` and
+/// so cannot build this list itself.
+fn dataset_revisions_footer(ruleset: &Ruleset) -> Vec<DatasetRevisionFooter> {
+    ruleset
+        .revisions()
+        .iter()
+        .map(|revision| DatasetRevisionFooter {
+            id: revision.id.to_string(),
+            iana_tzdb_version: revision.iana_tzdb_version.clone(),
+        })
+        .collect()
 }
 
 fn timeline_command(
@@ -419,6 +546,234 @@ fn timeline_command(
     Ok(out)
 }
 
+/// Derives the dataset's session bands over the `timeline` window, and every unordered
+/// pairwise overlap between the selected bands.
+///
+/// A band and an overlap are never published facts (`bands.rs`'s module docs): both carry
+/// a derivation note, and this shell prints it every time, so nothing here can be
+/// mistaken for something a venue announced. With one band selected there is no pair to
+/// overlap, so no overlap section is printed at all — a lone band overlapping itself is
+/// not a meaningful question, and `derive_overlap` refuses it for the same reason.
+fn bands_command(
+    ruleset: &Ruleset,
+    definitions: &[BandDefinition],
+    options: &Options,
+    now: NowMarker,
+) -> Result<String, String> {
+    let selected = options.select_bands(definitions)?;
+    let interval = options.window(now.instant)?;
+    let (bands, overlaps) = derive_all(&selected, ruleset, interval)?;
+
+    // `select_bands` fails loudly when `--band` names an id this dataset does not declare
+    // (its own doc comment) rather than silently dropping it, so an empty selection is not a
+    // state this command can reach: the only way `bands` ends up empty is a dataset that
+    // declares none. A second variant covering the unreachable case would be scaffolding
+    // claiming to be a distinction.
+    let empty_reason = bands
+        .is_empty()
+        .then_some(BandsEmptyReason::DatasetDeclaresNone);
+
+    if options.format == Format::Json {
+        return Ok(pretty(&bands_json(&bands, &overlaps, empty_reason)));
+    }
+
+    Ok(bands_text(&bands, &overlaps, empty_reason))
+}
+
+/// Why `bands_command` has nothing to report: the `bands` command exists to talk about
+/// bands, so an empty result must say why in both `text` and `json` output rather than
+/// rendering as silence (a bare `"\n"`) or an empty shape with no explanation.
+#[derive(Clone, Copy)]
+enum BandsEmptyReason {
+    /// The dataset itself declares no session bands.
+    DatasetDeclaresNone,
+}
+
+impl BandsEmptyReason {
+    fn message(self) -> &'static str {
+        match self {
+            Self::DatasetDeclaresNone => "this dataset declares no session bands",
+        }
+    }
+}
+
+/// The machine shape of the `bands` command: every selected band, then every pairwise
+/// overlap, each carrying `"derived": true` and its reasoning so a consumer can never
+/// mistake either for a venue-published fact.
+///
+/// `no_bands_reason` is always present as a key, `null` when `bands` is non-empty, a message
+/// when it is not — so an empty-bands consumer sees why in the shape itself, rather than
+/// having to infer it from an absent key.
+fn bands_json(
+    bands: &[SessionBand],
+    overlaps: &[BandOverlap],
+    empty_reason: Option<BandsEmptyReason>,
+) -> Value {
+    json!({
+        "bands": bands.iter().map(band_json).collect::<Vec<Value>>(),
+        "overlaps": overlaps.iter().map(overlap_json).collect::<Vec<Value>>(),
+        "no_bands_reason": empty_reason.map(BandsEmptyReason::message),
+    })
+}
+
+fn band_json(band: &SessionBand) -> Value {
+    let definition = band.definition();
+    json!({
+        "id": definition.id().to_string(),
+        "display_name": definition.display_name(),
+        "members": definition
+            .members()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>(),
+        "derived": true,
+        "reasoning": definition.derivation().reasoning(),
+        "interval": {"start": show(band.interval().start), "end": show(band.interval().end)},
+        "segments": band.segments().iter().map(band_segment_json).collect::<Vec<Value>>(),
+    })
+}
+
+fn band_segment_json(segment: &BandSegment) -> Value {
+    json!({
+        "start": show(segment.interval.start),
+        "end": show(segment.interval.end),
+        "state": segment.state.as_str(),
+        "uncertainty": segment.uncertainty.as_ref().map(ToString::to_string),
+        "venues_trading": segment.venues_trading.iter().map(ToString::to_string).collect::<Vec<String>>(),
+        "venues_unknown": segment.venues_unknown.iter().map(ToString::to_string).collect::<Vec<String>>(),
+    })
+}
+
+fn overlap_json(overlap: &BandOverlap) -> Value {
+    json!({
+        "bands": overlap.bands().iter().map(ToString::to_string).collect::<Vec<String>>(),
+        "derived": true,
+        "reasoning": overlap.derivation().reasoning(),
+        "interval": {"start": show(overlap.interval().start), "end": show(overlap.interval().end)},
+        "segments": overlap.segments().iter().map(overlap_segment_json).collect::<Vec<Value>>(),
+    })
+}
+
+fn overlap_segment_json(segment: &OverlapSegment) -> Value {
+    json!({
+        "start": show(segment.interval.start),
+        "end": show(segment.interval.end),
+        "state": segment.state.as_str(),
+        "uncertainty": segment.uncertainty.as_ref().map(ToString::to_string),
+    })
+}
+
+/// Turns a stable identifier — `BandState::as_str`, `OverlapState::as_str`, or
+/// [`Phase::as_str`]'s convention — into words for a person to read: `"not_trading"`
+/// becomes `"not trading"`. The one place in this shell that does that transform, so text
+/// rendering reads the vocabulary from the core (`state.as_str()`) rather than re-matching
+/// the enum itself to spell out its own copy of the same three words.
+fn prose(identifier: &str) -> String {
+    identifier.replace('_', " ")
+}
+
+/// The phrase for a slice with no uncertainty to report at all — every contributing
+/// member is itself unknown there (`BandSegment::uncertainty`'s doc comment). This must
+/// never read "exact": nothing here narrows to a claim that precise, the honest reading is
+/// that no schedule is known for the stretch at all.
+fn uncertainty_text(uncertainty: Option<&market_time_core::Uncertainty>) -> String {
+    match uncertainty {
+        Some(uncertainty) => uncertainty.to_string(),
+        None => "no schedule known for this stretch".to_owned(),
+    }
+}
+
+/// Renders the venues in a segment as a joined list, or a placeholder when there are none
+/// to name — never a bare empty string a reader might mistake for missing output.
+fn venue_list(venues: &[VenueId]) -> String {
+    if venues.is_empty() {
+        "none".to_owned()
+    } else {
+        venues
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn bands_text(
+    bands: &[SessionBand],
+    overlaps: &[BandOverlap],
+    empty_reason: Option<BandsEmptyReason>,
+) -> String {
+    if let Some(reason) = empty_reason {
+        return format!("{}\n", reason.message());
+    }
+
+    let mut out = String::new();
+
+    for band in bands {
+        let definition = band.definition();
+        out.push_str(&format!(
+            "band {}: {}\n",
+            definition.id(),
+            definition.display_name()
+        ));
+        out.push_str(&format!(
+            "  members  {}\n",
+            venue_list(definition.members())
+        ));
+        out.push_str(&format!(
+            "  derived  {}\n",
+            definition.derivation().reasoning()
+        ));
+        for segment in band.segments() {
+            let state = prose(segment.state.as_str());
+            out.push_str(&format!(
+                "  {} .. {}  {state}\n",
+                show(segment.interval.start),
+                show(segment.interval.end),
+            ));
+            out.push_str(&format!(
+                "    trading  {}\n",
+                venue_list(&segment.venues_trading)
+            ));
+            if !segment.venues_unknown.is_empty() {
+                out.push_str(&format!(
+                    "    unknown  {}\n",
+                    venue_list(&segment.venues_unknown)
+                ));
+            }
+            out.push_str(&format!(
+                "    uncertainty  {}\n",
+                uncertainty_text(segment.uncertainty.as_ref())
+            ));
+        }
+        out.push('\n');
+    }
+
+    if overlaps.is_empty() {
+        return out.trim_end_matches('\n').to_owned() + "\n";
+    }
+
+    out.push_str("overlaps\n");
+    for overlap in overlaps {
+        let [left, right] = overlap.bands();
+        out.push_str(&format!("  {left} x {right}\n"));
+        out.push_str(&format!(
+            "  derived  {}\n",
+            overlap.derivation().reasoning()
+        ));
+        for segment in overlap.segments() {
+            let state = prose(segment.state.as_str());
+            out.push_str(&format!(
+                "    {} .. {}  {state}  uncertainty: {}\n",
+                show(segment.interval.start),
+                show(segment.interval.end),
+                uncertainty_text(segment.uncertainty.as_ref()),
+            ));
+        }
+    }
+
+    out
+}
+
 /// How an answer is written down. Presentation only; the answer is the same either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -428,11 +783,15 @@ enum Format {
     Json,
     /// For eyes. The board as a self-contained SVG document.
     Svg,
+    /// For eyes, with a mouse. The board as a self-contained, interactive HTML page.
+    Html,
 }
 
 struct Options {
     dataset: Option<PathBuf>,
     venue: Option<String>,
+    bands: Vec<String>,
+    no_bands: bool,
     at: Option<String>,
     at_zone: Option<String>,
     zone: String,
@@ -446,6 +805,8 @@ impl Options {
         let mut options = Self {
             dataset: None,
             venue: None,
+            bands: Vec::new(),
+            no_bands: false,
             at: None,
             at_zone: None,
             zone: "UTC".to_owned(),
@@ -462,9 +823,18 @@ impl Options {
                     .cloned()
                     .ok_or_else(|| format!("{flag} needs a value"))
             };
+            // Every flag but `--no-bands` takes a value and so advances two args; `--no-bands`
+            // is a bare switch and advances one. Declared per-iteration rather than as a
+            // constant so a future bare switch has an obvious place to set it too.
+            let mut step = 2;
             match flag {
                 "--dataset" => options.dataset = Some(PathBuf::from(value()?)),
                 "--venue" => options.venue = Some(value()?),
+                "--band" => options.bands.push(value()?),
+                "--no-bands" => {
+                    options.no_bands = true;
+                    step = 1;
+                }
                 "--at" => options.at = Some(value()?),
                 "--at-zone" => options.at_zone = Some(value()?),
                 "--zone" => options.zone = value()?,
@@ -478,8 +848,11 @@ impl Options {
                         "text" => Format::Text,
                         "json" => Format::Json,
                         "svg" => Format::Svg,
+                        "html" => Format::Html,
                         other => {
-                            return Err(format!("--format {other:?} is not text, json, or svg"));
+                            return Err(format!(
+                                "--format {other:?} is not text, json, svg, or html"
+                            ));
                         }
                     };
                 }
@@ -490,10 +863,49 @@ impl Options {
                 }
                 other => return Err(format!("unknown option {other:?}")),
             }
-            index += 2;
+            index += step;
         }
 
         Ok(options)
+    }
+
+    /// The bands to derive: the ones named by `--band`, in the order given, or every band
+    /// the dataset declares when none was named.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `--band` names an id blank, or one this dataset does not
+    /// declare — the same "fail loudly" stance `required_venue` takes for an unknown
+    /// venue, rather than silently deriving fewer bands than were asked for. Also returns a
+    /// message when the same `--band` value is given more than once: `derive_all` pairs
+    /// every selected band with every other one to compute overlaps, so a duplicate would
+    /// pair a band with itself and surface as `BandError::SameBand` — a confusing answer
+    /// for what is really a repeated flag, so it is rejected here instead, where the
+    /// message can name the actual mistake.
+    fn select_bands(&self, definitions: &[BandDefinition]) -> Result<Vec<BandDefinition>, String> {
+        if self.bands.is_empty() {
+            return Ok(definitions.to_vec());
+        }
+
+        let mut seen: Vec<&str> = Vec::with_capacity(self.bands.len());
+        for requested in &self.bands {
+            if seen.contains(&requested.as_str()) {
+                return Err(format!("--band {requested:?} was named more than once"));
+            }
+            seen.push(requested);
+        }
+
+        self.bands
+            .iter()
+            .map(|requested| {
+                let id = BandId::new(requested).map_err(|error| error.to_string())?;
+                definitions
+                    .iter()
+                    .find(|definition| definition.id() == &id)
+                    .cloned()
+                    .ok_or_else(|| format!("no band named {requested:?} in this dataset"))
+            })
+            .collect()
     }
 
     /// The venues to answer for: the one that was named, or every venue in the dataset.
