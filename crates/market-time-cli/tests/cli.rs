@@ -606,6 +606,65 @@ fn bands_text_names_every_bands_derivation_and_reports_a_real_overlap() {
 }
 
 #[test]
+fn bands_at_now_states_the_host_clock_discipline_it_read() {
+    // `cli.md`'s "clock discipline applies to the CLI, not only the board" judgment call:
+    // any surface reporting "now" MUST carry the host clock's discipline bounds rather than
+    // presenting the instant as exact. `phase` already did; `bands` originally said nothing,
+    // which is the defect this covers. Both formats must carry it, because `--format`
+    // changes presentation, not which facts exist.
+    let json = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "now",
+        "--format",
+        "json",
+    ]);
+    assert!(json.status.success(), "{}", stderr(&json));
+    let json_text = stdout(&json);
+    assert!(
+        json_text.contains("\"clock\""),
+        "bands --at now --format json must carry the clock discipline it read: {json_text}"
+    );
+    assert!(
+        json_text.contains("discipline unmeasured"),
+        "the host clock here has no NTP/PTP bound, and that absence must be stated rather \
+         than omitted: {json_text}"
+    );
+
+    let text = run(&["bands", "--dataset", &fixture(), "--at", "now"]);
+    assert!(text.status.success(), "{}", stderr(&text));
+    let text_out = stdout(&text);
+    assert!(
+        text_out.contains("as of host clock discipline unmeasured"),
+        "bands --at now --format text must state the same bound, not print a bare now: \
+         {text_out}"
+    );
+}
+
+#[test]
+fn bands_with_an_explicit_at_says_no_clock_was_read() {
+    // The other half of the same rule: an explicit `--at` consulted no host clock, and the
+    // output must say so rather than going silent — a reader who sees no clock line at all
+    // cannot tell "no clock was read" from "the tool forgot to mention it".
+    let output = run(&[
+        "bands",
+        "--dataset",
+        &fixture(),
+        "--at",
+        "2026-11-27T14:00:00Z",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let text = stdout(&output);
+    assert!(
+        text.contains("as of instant supplied, not read from a clock"),
+        "an explicit --at must state that no host clock was consulted: {text}"
+    );
+}
+
+#[test]
 fn bands_json_marks_every_band_and_overlap_derived_and_never_renders_a_null_uncertainty_as_exact() {
     let output = run(&[
         "bands",
@@ -797,11 +856,136 @@ fn bands_text_says_so_when_the_dataset_declares_no_bands() {
     assert!(output.status.success(), "{}", stderr(&output));
 
     let text = stdout(&output);
-    assert_eq!(
-        text.trim_end(),
-        "this dataset declares no session bands",
+    assert!(
+        text.contains("this dataset declares no session bands"),
         "the bands command exists to talk about bands, so an empty result must say why \
          rather than printing a bare blank line: {text:?}"
+    );
+    // An empty dataset is still an answer produced from an instant this shell read, so the
+    // clock statement is owed regardless of how little there was to report — it must not
+    // depend on dataset contents.
+    assert!(
+        text.contains("as of"),
+        "the clock statement is owed even when the dataset declares no bands: {text:?}"
+    );
+}
+
+#[test]
+fn every_surface_reporting_now_states_the_host_clock_discipline() {
+    // `cli.md`'s clock-discipline rule is CLI-wide, not `phase`-only: every surface that
+    // reads the host clock for `--at now` must say how well that instant is known. Each of
+    // these commands was silent in at least one format before this rule was applied to it.
+    let dataset = fixture();
+    let cases: [&[&str]; 4] = [
+        &[
+            "evidence",
+            "--venue",
+            "SYNTH-ALWAYS",
+            "--at",
+            "now",
+            "--format",
+            "json",
+        ],
+        &["timeline", "--venue", "SYNTH-ALWAYS", "--at", "now"],
+        &[
+            "timeline",
+            "--venue",
+            "SYNTH-ALWAYS",
+            "--at",
+            "now",
+            "--format",
+            "json",
+        ],
+        &["bands", "--at", "now"],
+    ];
+
+    for case in cases {
+        let mut args = vec![case[0], "--dataset", &dataset];
+        args.extend_from_slice(&case[1..]);
+        let output = run(&args);
+        assert!(
+            output.status.success(),
+            "{} -- {}",
+            case[0],
+            stderr(&output)
+        );
+
+        let text = stdout(&output);
+        assert!(
+            text.contains("discipline unmeasured") || text.contains("\"clock\""),
+            "`{}` reports now but does not state the host clock's discipline: {text}",
+            case.join(" ")
+        );
+    }
+}
+
+#[test]
+fn an_error_that_names_the_resolved_instant_states_the_clock_too() {
+    // `cli.md` binds "output" that reports the resolved instant, and a refusal that quotes
+    // that instant is output just as a success message is. A previous version let `--hours`
+    // and the no-segment error print a host-clock reading with no statement about how well
+    // it was known — the same defect the success paths had already been fixed for.
+    let now = run(&[
+        "evidence",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-ALWAYS",
+        "--at",
+        "now",
+        "--hours",
+        "-24",
+    ]);
+    assert!(!now.status.success(), "a negative window is refused");
+    assert!(
+        stderr(&now).contains("discipline unmeasured"),
+        "the refusal names the resolved instant, so it must state the clock: {}",
+        stderr(&now)
+    );
+
+    let explicit = run(&[
+        "evidence",
+        "--dataset",
+        &fixture(),
+        "--venue",
+        "SYNTH-ALWAYS",
+        "--at",
+        "2026-11-27T14:00:00Z",
+        "--hours",
+        "-24",
+    ]);
+    assert!(!explicit.status.success(), "a negative window is refused");
+    assert!(
+        stderr(&explicit).contains("not read from a clock"),
+        "and an explicit instant must say no clock was consulted: {}",
+        stderr(&explicit)
+    );
+}
+
+#[test]
+fn venues_refuses_at_rather_than_accepting_and_ignoring_it() {
+    // `venues` lists identifiers from the dataset and uses no instant. It used to accept
+    // --at, exit 0, and print output byte-identical to the no-flag run — the flag was
+    // validated and then discarded, which tells a caller their --at mattered when it did
+    // not. Refusing is the honest answer.
+    let with_at = run(&["venues", "--dataset", &fixture(), "--at", "now"]);
+    assert!(
+        !with_at.status.success(),
+        "venues must not accept an --at its answer does not depend on"
+    );
+    assert!(
+        stderr(&with_at).contains("does not take --at"),
+        "the refusal must say which flag and why: {}",
+        stderr(&with_at)
+    );
+
+    // The flagless form is unchanged: this rejects a misuse, not the command.
+    let plain = run(&["venues", "--dataset", &fixture()]);
+    assert!(plain.status.success(), "{}", stderr(&plain));
+    assert!(
+        stdout(&plain).contains("SYNTH-ALWAYS"),
+        "venues still lists the dataset's venues: {}",
+        stdout(&plain)
     );
 }
 

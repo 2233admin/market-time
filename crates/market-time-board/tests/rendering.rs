@@ -781,3 +781,568 @@ fn a_no_schedule_band_segment_is_marked_in_the_default_svg_view_not_only_in_hove
         "and must not print the footnote when it names nothing on the page: {known_svg}"
     );
 }
+
+#[test]
+fn a_no_schedule_band_segment_is_stated_in_the_text_board_not_only_in_the_svg() {
+    // The same two views the SVG test above uses, rendered through the text board. That
+    // test is satisfied by `svg.rs`; this one guards the other renderer, which draws the
+    // same derived rows through `render_band_section` and originally dropped the
+    // `uncertainty: None` case entirely — satisfying `board.md`'s rule in one renderer
+    // and violating it in the other is the defect this covers.
+    let no_schedule = banded_view("UTC", "2027-02-01T00:00:00Z", "2027-02-02T00:00:00Z", None);
+    let text = market_time_board::render(&no_schedule);
+
+    let heading_at = text
+        .find("DERIVED BANDS")
+        .expect("the band section is drawn");
+
+    // `board.md` asks for a marker on the affected row, not only a footnote: a row can hold
+    // an ordinary unknown-with-uncertainty stretch and a no-schedule one, both otherwise
+    // rendering `x`.
+    assert!(
+        text[heading_at..].contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "a segment with nothing at all known must be marked on its own row in the default \
+         view, distinctly from `x` (an unknown state): {text}"
+    );
+    assert!(
+        text[heading_at..].contains("no schedule"),
+        "and the section must state that absence in its own key, in the default view rather \
+         than only on hover: {text}"
+    );
+    // A marker on the row is required, in the track where a column samples inside the stretch
+    // and beside the status where none does; either way the section line names it.
+    assert!(
+        text[heading_at..].contains("no schedule is known for a stretch"),
+        "the section's line must state the absence and name the marker: {text}"
+    );
+
+    // A fully in-coverage day has nothing to mark, so neither the marker nor the line may
+    // appear — the statement is conditional on some drawn segment's uncertainty being
+    // `None`, which board.md lines 147-149 make explicit.
+    let all_known = banded_view(
+        "UTC",
+        "2026-07-30T00:00:00Z",
+        "2026-07-31T00:00:00Z",
+        Some("2026-07-30T04:00:00Z"),
+    );
+    let known_text = market_time_board::render(&all_known);
+    let known_heading_at = known_text
+        .find("DERIVED BANDS")
+        .expect("the band section is drawn");
+
+    assert!(
+        !known_text[known_heading_at..].contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "a fully in-coverage day has nothing to mark: {known_text}"
+    );
+    assert!(
+        !known_text[known_heading_at..].contains("no schedule"),
+        "and must not print the line when it names nothing on the page: {known_text}"
+    );
+}
+
+#[test]
+fn the_now_marker_does_not_erase_a_no_schedule_marker() {
+    // `board.md` requires a marker on the affected row *and* the section footnote that names
+    // it. The footnote prints whenever the row contains a `None` stretch, so if the instant
+    // marker could overwrite the only `@` the page would carry a footnote pointing at a
+    // glyph that is not there. The instant is stated elsewhere (`now:` under the board, and
+    // the band row's status column), so the marker yields.
+    //
+    // The shipped fixture cannot express this: its `None` regions are hours wide, so erasing
+    // one cell is invisible. This builds a dataset whose only `None` stretch is one column
+    // wide, with `now` on that same column, so the marker has exactly one `@` to destroy.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-01-01T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "V1", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:10Z", "end": "2026-01-02T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-01-01"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/v1", "fetched_at": "2026-01-01T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    // Coverage starts ten seconds after the window does, so the band's first segment is
+    // `None` over the window's opening seconds. `now` sits at the window start, which is the
+    // column that segment occupies — the collision this test exists for. It is deliberately
+    // the *first* column: with a `None` region many columns wide, erasing one cell would be
+    // invisible and the test would pass against the bug.
+    let interval = Interval::new(
+        instant("2026-01-01T00:00:00Z"),
+        instant("2026-01-02T00:00:00Z"),
+    )
+    .expect("valid interval");
+
+    let venue = VenueId::new("V1").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("b1").expect("valid identifier"),
+        "Only Band",
+        vec![venue.clone()],
+        DerivationNote::new("test fixture grouping").expect("non-empty"),
+    )
+    .expect("valid definition");
+
+    let timelines = vec![resolve_timeline(interval, &venue, &ruleset)];
+    let band = derive_band(&definition, &timelines).expect("the timeline derives");
+    assert!(
+        band.segments()
+            .iter()
+            .any(|segment| segment.uncertainty.is_none()),
+        "the derived band must carry a `None` segment for this test to mean anything"
+    );
+
+    let mut board = view("UTC", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", None);
+    board.columns = 72;
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+
+    // With no `now`, the row shows the absence marker.
+    let without_now = render(&board);
+    assert!(
+        without_now.contains(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "the row carries the marker when no instant is drawn on it: {without_now}"
+    );
+
+    // Put the instant marker on the first column, the same one the `None` stretch occupies.
+    board.now = Some(NowMarker {
+        instant: interval.start,
+        discipline: ClockDiscipline::Given {
+            source: "test".to_owned(),
+        },
+    });
+    let with_now = render(&board);
+    // The instant marker would take the first column, which is the only column the `None`
+    // stretch occupies. If it won, the row would open with `|` and carry no marker at all
+    // while the footnote still named one — the misleading pair this guards against.
+    let band_row = with_now
+        .lines()
+        .find(|line| line.starts_with("b1:"))
+        .expect("the band row is drawn");
+    assert!(
+        band_row.contains("[@"),
+        "the instant marker must not erase the only absence marker on the row: {band_row}"
+    );
+    assert!(
+        with_now.contains("no schedule is known for a stretch"),
+        "and the footnote naming it must agree with the row: {with_now}"
+    );
+}
+
+#[test]
+fn an_unsampled_none_stretch_marks_the_row_not_a_wrong_column() {
+    // A `None` stretch narrower than one column: the cell loop draws the state glyph for the
+    // column it falls in — `x`, indistinguishable from an ordinary unknown — so the row would
+    // carry no `@` at all while the footnote named one. `board.md` requires both. The marker
+    // belongs on that column, because that column *is* inside the stretch.
+    //
+    // Built inline because the shipped fixture has no sub-column `None` region: two venues
+    // whose coverage ends and begins ten seconds apart, grouped into one band, so the band
+    // has nothing known for those ten seconds.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-07-30T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "A", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-11-27T12:10:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-11-27"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/a", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            },
+            {
+              "venue": "B", "home_zone": "UTC",
+              "coverage": {"start": "2026-11-27T12:10:10Z", "end": "2026-12-31T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-11-27", "end": "2026-12-30"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/b", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    let interval = Interval::new(
+        instant("2026-11-27T00:00:00Z"),
+        instant("2026-11-28T00:00:00Z"),
+    )
+    .expect("valid interval");
+
+    let a = VenueId::new("A").expect("valid identifier");
+    let b = VenueId::new("B").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("band-gap").expect("valid identifier"),
+        "Gap Band",
+        vec![a.clone(), b.clone()],
+        DerivationNote::new("test fixture grouping").expect("non-empty"),
+    )
+    .expect("valid definition");
+
+    let timelines = vec![
+        resolve_timeline(interval, &a, &ruleset),
+        resolve_timeline(interval, &b, &ruleset),
+    ];
+    let band = derive_band(&definition, &timelines).expect("the timelines derive");
+    assert!(
+        band.segments()
+            .iter()
+            .any(|segment| segment.uncertainty.is_none()),
+        "the ten-second gap must derive a `None` segment for this test to mean anything"
+    );
+
+    let mut board = view("UTC", "2026-11-27T00:00:00Z", "2026-11-28T00:00:00Z", None);
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+
+    let text = render(&board);
+    let row = text
+        .lines()
+        .find(|line| line.starts_with("band-gap:"))
+        .expect("the band row is drawn");
+
+    // The row is 48 columns of `x` and the gap is far narrower than one of them, so no column
+    // samples inside the stretch and the track cannot point at it: the column the stretch
+    // begins in samples 12:00, which the data reports as known, and marking that would put
+    // "no schedule is known here" on a stretch that is exact — the one error this product
+    // exists to prevent. The grid therefore marks the *row*, beside the status, which is what
+    // `board.md` asks for: a marker on the affected row, not necessarily inside the track.
+    assert!(
+        !row.contains("[x@") && !row.contains("@x"),
+        "no column samples inside the stretch, so the track must not be marked: {row}"
+    );
+    assert!(
+        row.ends_with(market_time_board::BAND_NO_SCHEDULE_GLYPH),
+        "but the row itself must carry a marker, as the contract requires: {row}"
+    );
+
+    // The statement names that marker; it never points at one the row does not carry.
+    assert!(
+        text.contains("no schedule is known for a stretch"),
+        "the stretch must be stated: {text}"
+    );
+}
+
+#[test]
+fn a_stretch_a_column_does_sample_is_marked_and_may_be_narrow() {
+    // The counterpart: when some column's sample falls inside the `None` stretch the marker
+    // is drawn, even though the stretch is far narrower than that column. 71 columns puts a
+    // sample at 12:10:08, inside the ten-second gap from this same fixture.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-07-30T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "A", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-11-27T12:10:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-11-27"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/a", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            },
+            {
+              "venue": "B", "home_zone": "UTC",
+              "coverage": {"start": "2026-11-27T12:10:10Z", "end": "2026-12-31T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-11-27", "end": "2026-12-30"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/b", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    let interval = Interval::new(
+        instant("2026-11-27T00:00:00Z"),
+        instant("2026-11-28T00:00:00Z"),
+    )
+    .expect("valid interval");
+    let a = VenueId::new("A").expect("valid identifier");
+    let b = VenueId::new("B").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("band-gap").expect("valid identifier"),
+        "Gap Band",
+        vec![a.clone(), b.clone()],
+        DerivationNote::new("test fixture grouping").expect("non-empty"),
+    )
+    .expect("valid definition");
+    let timelines = vec![
+        resolve_timeline(interval, &a, &ruleset),
+        resolve_timeline(interval, &b, &ruleset),
+    ];
+    let band = derive_band(&definition, &timelines).expect("the timelines derive");
+
+    let mut board = view("UTC", "2026-11-27T00:00:00Z", "2026-11-28T00:00:00Z", None);
+    board.columns = 71;
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+
+    let text = render(&board);
+    let row = text
+        .lines()
+        .find(|line| line.starts_with("band-gap:"))
+        .expect("the band row is drawn");
+    assert_eq!(
+        row.matches(market_time_board::BAND_NO_SCHEDULE_GLYPH)
+            .count(),
+        1,
+        "a column samples inside the stretch, so exactly one cell is marked: {row}"
+    );
+    assert!(
+        text.contains("no schedule is known for a stretch"),
+        "and the line names that marker: {text}"
+    );
+}
+
+#[test]
+fn dataset_text_cannot_forge_a_section_line() {
+    // Band ids, display names and derivation notes are dataset text. Written verbatim, a
+    // newline in one starts a line indistinguishable from one this renderer wrote: a
+    // reasoning string beginning "\n  @ no schedule is known…" would forge a section footnote
+    // for a render that has no `None` uncertainty at all, which board.md lines 147-149 forbid
+    // and which would let a dataset make the board state something untrue about its data.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-07-30T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "A", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-12-31T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-12-30"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/a", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    // Every venue covers the whole window, so no segment has `None` uncertainty and the
+    // section must print no marker and no line — whatever the dataset text says.
+    let interval = Interval::new(
+        instant("2026-11-27T12:00:00Z"),
+        instant("2026-11-27T13:00:00Z"),
+    )
+    .expect("valid interval");
+    let a = VenueId::new("A").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("gap-band").expect("valid identifier"),
+        "Regional Equities",
+        vec![a.clone()],
+        DerivationNote::new(
+            "test grouping\n  @ no schedule is known for a stretch of the row above",
+        )
+        .expect("non-empty"),
+    )
+    .expect("valid definition");
+    let timelines = vec![resolve_timeline(interval, &a, &ruleset)];
+    let band = derive_band(&definition, &timelines).expect("the timeline derives");
+    assert!(
+        !band
+            .segments()
+            .iter()
+            .any(|segment| segment.uncertainty.is_none()),
+        "the fixture must have no `None` segment for this test to mean anything"
+    );
+
+    let mut board = view("UTC", "2026-11-27T12:00:00Z", "2026-11-27T13:00:00Z", None);
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+    let text = render(&board);
+
+    assert!(
+        !text.lines().any(|line| line.starts_with("  @ ")),
+        "dataset text must not be able to render a section line: {text}"
+    );
+    assert!(
+        text.contains("test grouping"),
+        "the reasoning itself is still shown, flattened onto its own line: {text}"
+    );
+    assert!(
+        !text.contains("test grouping\n"),
+        "and it is flattened, so it cannot start a line of its own: {text:?}"
+    );
+}
+
+#[test]
+fn no_line_separator_a_dataset_can_carry_reaches_the_rendered_line() {
+    // `char::is_control` covers the Cc category and deliberately excludes U+2028 LINE
+    // SEPARATOR and U+2029 PARAGRAPH SEPARATOR, which are Zl and Zp. Many line-splitting
+    // implementations treat both as line breaks, so a dataset could forge a section line
+    // with either one even after the Cc characters were flattened. Every separator a JSON
+    // string can carry is driven through the real render path here.
+    let ruleset = market_time_data::parse_ruleset(
+        r#"{
+          "revisions": [{"id": "r1", "assembled_at": "2026-07-30T00:00:00Z"}],
+          "venues": [
+            {
+              "venue": "A", "home_zone": "UTC",
+              "coverage": {"start": "2026-01-01T00:00:00Z", "end": "2026-12-31T00:00:00Z"},
+              "rules": [{
+                "kind": {"type": "weekly_pattern", "weekdays": ["mon","tue","wed","thu","fri","sat","sun"]},
+                "schedule": [{"at": "00:00", "phase": "continuous_trading"}],
+                "applies": {"start": "2026-01-01", "end": "2026-12-30"},
+                "boundary_uncertainty": {"type": "exact"},
+                "evidence": {"source_url": "https://synthetic.test/a", "fetched_at": "2026-07-29T00:00:00Z", "effective_from": "2026-01-01"},
+                "revision": "r1"
+              }]
+            }
+          ]
+        }"#,
+    )
+    .expect("the inline dataset parses");
+
+    let interval = Interval::new(
+        instant("2026-11-27T12:00:00Z"),
+        instant("2026-11-27T13:00:00Z"),
+    )
+    .expect("valid interval");
+    let a = VenueId::new("A").expect("valid identifier");
+
+    for separator in [
+        '\n', '\r', '\t', '\u{000b}', '\u{000c}', '\u{2028}', '\u{2029}',
+    ] {
+        let definition = BandDefinition::new(
+            BandId::new(format!("id{separator}x")).expect("valid identifier"),
+            format!("Name{separator}Forged"),
+            vec![a.clone()],
+            DerivationNote::new(format!(
+                "prefix{separator}  @ no schedule is known for a stretch"
+            ))
+            .expect("non-empty"),
+        )
+        .expect("valid definition");
+
+        let timelines = vec![resolve_timeline(interval, &a, &ruleset)];
+        let band = derive_band(&definition, &timelines).expect("the timeline derives");
+
+        let mut board = view("UTC", "2026-11-27T12:00:00Z", "2026-11-27T13:00:00Z", None);
+        board.bands = BandSection {
+            bands: vec![band],
+            overlaps: Vec::new(),
+        };
+        let text = render(&board);
+
+        // Fully covered, so no `None` segment exists and no line may begin with the marker.
+        //
+        // The check cannot use `str::lines`, which splits only on `\n`/`\r\n` and would miss
+        // U+2028/U+2029; it splits on every separator a Unicode-aware reader would treat as a
+        // line break. For the Cc characters, which this renderer itself uses for real line
+        // breaks, what matters is that no *segment* the dataset could start begins with the
+        // marker — not their absence from the output, which would be wrong.
+        for segment in text.split(['\n', '\u{2028}', '\u{2029}']) {
+            assert!(
+                !segment.starts_with("  @ "),
+                "separator {separator:?} forged a section line: {segment:?}"
+            );
+        }
+        if !separator.is_ascii_whitespace() {
+            assert!(
+                !text.contains(separator),
+                "separator {separator:?} reached the rendered output unflattened: {text:?}"
+            );
+        }
+        // The dataset text is still shown, just flattened onto the line it belongs to.
+        assert!(
+            text.contains("prefix"),
+            "separator {separator:?} made the reasoning vanish: {text}"
+        );
+    }
+}
+
+#[test]
+fn a_no_schedule_stretch_shorter_than_one_column_still_reaches_the_footnote() {
+    // A `None` stretch can be narrower than a single column of a wide window: the grid then
+    // has no cell inside it and draws `x` over that stretch, exactly as it draws `x` for an
+    // ordinary unknown. An earlier version decided the footnote by looking at what the cells
+    // sampled, so the statement vanished for precisely these stretches — the widest windows,
+    // where a reader is least able to check by eye.
+    //
+    // The section is built with ONE band and no overlap on purpose. With two bands the
+    // fixture's overlap row also carries the marker, so its footnote prints either way and
+    // the test would pass against the buggy version too — it must isolate the band row for
+    // this assertion to mean anything.
+    let ruleset = ruleset();
+    let interval = Interval::new(
+        instant("2026-12-30T16:05:00Z"),
+        instant("2026-12-31T16:05:00Z"),
+    )
+    .expect("valid interval");
+
+    let auct = VenueId::new("SYNTH-AUCT").expect("valid identifier");
+    let dst = VenueId::new("SYNTH-DST").expect("valid identifier");
+    let definition = BandDefinition::new(
+        BandId::new("band-test-regional").expect("valid identifier"),
+        "Test Regional",
+        vec![auct.clone(), dst.clone()],
+        DerivationNote::new("test fixture grouping, not any real desk's").expect("non-empty"),
+    )
+    .expect("valid definition");
+
+    // The fixture's regional band ends with a five-minute `None` stretch at
+    // 2026-12-31T16:00Z. This window ends at 16:05Z, so that stretch is inside it.
+    let timelines = vec![
+        resolve_timeline(interval, &auct, &ruleset),
+        resolve_timeline(interval, &dst, &ruleset),
+    ];
+    let band = derive_band(&definition, &timelines).expect("the fixture's timelines derive");
+    assert!(
+        band.segments()
+            .iter()
+            .any(|segment| segment.uncertainty.is_none()),
+        "the fixture must still produce a `None` stretch for this test to mean anything"
+    );
+
+    let mut board = view("UTC", "2026-12-30T16:05:00Z", "2026-12-31T16:05:00Z", None);
+    board.bands = BandSection {
+        bands: vec![band],
+        overlaps: Vec::new(),
+    };
+
+    let text = render(&board);
+    assert!(
+        text.contains("no schedule"),
+        "a `None` stretch inside the window must be stated even when no column samples it: \
+         {text}"
+    );
+}

@@ -114,6 +114,19 @@ fn run(args: &[String]) -> Result<String, String> {
         .ok_or_else(|| "--dataset <path> is required".to_owned())?;
     let dataset = load_dataset(&dataset_path).map_err(|error| error.to_string())?;
     let ruleset = &dataset.ruleset;
+
+    // `venues` lists identifiers from the dataset and uses no instant, so an `--at` here
+    // would be validated and then silently discarded — the parser accepts it and the result
+    // is byte-identical with and without it. Refusing it is the honest answer: a caller
+    // passing `--at` expects it to matter. This is checked before the clock is read, so the
+    // command also stops paying for a host-clock read it never uses.
+    if command == "venues" && options.at.is_some() {
+        return Err(format!(
+            "`venues` does not take --at: it lists the dataset's venues, and no answer it \
+             prints depends on an instant\n\n{USAGE}"
+        ));
+    }
+
     let now = options.resolve_now()?;
 
     match command {
@@ -168,14 +181,18 @@ fn evidence_command(
     now: NowMarker,
 ) -> Result<String, String> {
     let venue = options.required_venue("evidence")?;
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let timeline = resolve_timeline(interval, &venue, ruleset);
 
-    let detail = market_time_board::inspect(&timeline, now.instant)
-        .ok_or_else(|| format!("no segment covers {} for {venue}", show(now.instant)))?;
+    let detail = market_time_board::inspect(&timeline, now.instant).ok_or_else(|| {
+        options.unusable_window(
+            &format!("no segment covers {} for {venue}", show(now.instant)),
+            &now,
+        )
+    })?;
 
     if options.format == Format::Json {
-        return Ok(pretty(&detail_json(&detail)));
+        return Ok(pretty(&detail_json(&detail, &now)));
     }
 
     let mut out = format!("{venue} at {}\n", show(now.instant));
@@ -222,8 +239,17 @@ fn evidence_command(
     Ok(out)
 }
 
-fn detail_json(detail: &SegmentDetail) -> Value {
+/// The machine shape of one segment's evidence.
+///
+/// Carries `at` and `clock` for the same reason the text shape closes with an `as of` line:
+/// `cli.md` makes stating the host clock's discipline a CLI-wide obligation whenever `--at
+/// now` read the host clock, and its own output-shape rule says `--format` changes
+/// presentation, not which fields exist — so the text shape having the line and this one
+/// omitting the field would be a format-dependent fact, which is the thing that rule bans.
+fn detail_json(detail: &SegmentDetail, now: &NowMarker) -> Value {
     json!({
+        "at": show(now.instant),
+        "clock": now.discipline.describe(),
         "venue": detail.venue.to_string(),
         "interval": {
             "start": show(detail.interval.start),
@@ -405,7 +431,7 @@ fn board_command(
     options: &Options,
     now: NowMarker,
 ) -> Result<String, String> {
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let rows = ruleset
         .venues()
         .iter()
@@ -490,7 +516,7 @@ fn timeline_command(
     now: NowMarker,
 ) -> Result<String, String> {
     let venue = options.required_venue("a timeline")?;
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let timeline = resolve_timeline(interval, &venue, ruleset);
 
     if options.format == Format::Json {
@@ -515,6 +541,8 @@ fn timeline_command(
             .collect();
 
         return Ok(pretty(&json!({
+            "at": show(now.instant),
+            "clock": now.discipline.describe(),
             "venue": venue.to_string(),
             "interval": {"start": show(interval.start), "end": show(interval.end)},
             "tiles_interval": timeline.tiles_interval(),
@@ -543,6 +571,10 @@ fn timeline_command(
         "  tiles the queried interval: {}\n",
         timeline.tiles_interval()
     ));
+    // The same obligation `phase`, `evidence` and `bands` discharge: where this surface's
+    // window came from the host clock, say how well that instant is known rather than
+    // letting a reader take the rendered boundaries as exact.
+    out.push_str(&format!("  as of    {}\n", now.discipline.describe()));
     Ok(out)
 }
 
@@ -561,7 +593,7 @@ fn bands_command(
     now: NowMarker,
 ) -> Result<String, String> {
     let selected = options.select_bands(definitions)?;
-    let interval = options.window(now.instant)?;
+    let interval = options.window(&now)?;
     let (bands, overlaps) = derive_all(&selected, ruleset, interval)?;
 
     // `select_bands` fails loudly when `--band` names an id this dataset does not declare
@@ -574,10 +606,10 @@ fn bands_command(
         .then_some(BandsEmptyReason::DatasetDeclaresNone);
 
     if options.format == Format::Json {
-        return Ok(pretty(&bands_json(&bands, &overlaps, empty_reason)));
+        return Ok(pretty(&bands_json(&bands, &overlaps, empty_reason, &now)));
     }
 
-    Ok(bands_text(&bands, &overlaps, empty_reason))
+    Ok(bands_text(&bands, &overlaps, empty_reason, &now))
 }
 
 /// Why `bands_command` has nothing to report: the `bands` command exists to talk about
@@ -604,12 +636,21 @@ impl BandsEmptyReason {
 /// `no_bands_reason` is always present as a key, `null` when `bands` is non-empty, a message
 /// when it is not — so an empty-bands consumer sees why in the shape itself, rather than
 /// having to infer it from an absent key.
+///
+/// `clock` carries the host clock's discipline bounds whenever `--at now` read the host
+/// clock, exactly as `phase_command` does. `cli.md` makes this a CLI-wide obligation, not a
+/// `phase`-only one: a surface that reports "now" must never present that instant as exact.
+/// It is named for the `NowMarker` behind it, so an explicit `--at` states that no host
+/// clock was consulted rather than omitting the key and inviting the reader to assume one.
 fn bands_json(
     bands: &[SessionBand],
     overlaps: &[BandOverlap],
     empty_reason: Option<BandsEmptyReason>,
+    now: &NowMarker,
 ) -> Value {
     json!({
+        "at": show(now.instant),
+        "clock": now.discipline.describe(),
         "bands": bands.iter().map(band_json).collect::<Vec<Value>>(),
         "overlaps": overlaps.iter().map(overlap_json).collect::<Vec<Value>>(),
         "no_bands_reason": empty_reason.map(BandsEmptyReason::message),
@@ -701,12 +742,18 @@ fn bands_text(
     bands: &[SessionBand],
     overlaps: &[BandOverlap],
     empty_reason: Option<BandsEmptyReason>,
+    now: &NowMarker,
 ) -> String {
-    if let Some(reason) = empty_reason {
-        return format!("{}\n", reason.message());
-    }
+    // The clock statement comes first and unconditionally: an empty result is still an
+    // answer produced from an instant this shell read, and `cli.md` binds the surface
+    // regardless of how much it found to say. Returning the reason alone would make the
+    // obligation depend on dataset contents.
+    let mut out = format!("as of {}\n", now.discipline.describe());
 
-    let mut out = String::new();
+    if let Some(reason) = empty_reason {
+        out.push_str(&format!("{}\n", reason.message()));
+        return out;
+    }
 
     for band in bands {
         let definition = band.definition();
@@ -1007,16 +1054,28 @@ impl Options {
         }
     }
 
-    fn window(&self, now: UtcInstant) -> Result<Interval, String> {
+    /// The queried window, and the errors that refuse one.
+    ///
+    /// Takes the whole [`NowMarker`] rather than just its instant because `cli.md` binds any
+    /// output that reports the resolved instant, and a refusal that quotes `--hours` is still
+    /// a surface reporting the instant it was applied to. Carrying the discipline here rather
+    /// than at each call site means a command added later cannot forget it.
+    fn window(&self, now: &NowMarker) -> Result<Interval, String> {
         let span = i128::from(self.hours) * 3_600 * 1_000_000_000;
         if span == 0 {
-            return Err("--hours must not be zero".to_owned());
+            return Err(self.unusable_window("--hours must not be zero", now));
         }
+        let instant = now.instant;
         let (start, end) = if span > 0 {
-            (now, now.saturating_add_nanos(span))
+            (instant, instant.saturating_add_nanos(span))
         } else {
-            (now.saturating_add_nanos(span), now)
+            (instant.saturating_add_nanos(span), instant)
         };
-        Interval::new(start, end).map_err(|error| error.to_string())
+        Interval::new(start, end).map_err(|error| self.unusable_window(&error.to_string(), now))
+    }
+
+    /// A refused window, with the clock statement the command would otherwise have printed.
+    fn unusable_window(&self, reason: &str, now: &NowMarker) -> String {
+        format!("{reason}\n{}", now.discipline.describe())
     }
 }
